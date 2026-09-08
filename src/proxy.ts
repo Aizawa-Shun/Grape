@@ -60,7 +60,7 @@ function withRequestId(request: NextRequest): NextResponse {
   return NextResponse.next({ request: { headers } });
 }
 
-export async function middleware(request: NextRequest): Promise<NextResponse> {
+export async function proxy(request: NextRequest): Promise<NextResponse> {
   const { pathname } = request.nextUrl;
   if (isPublic(pathname)) return withRequestId(request);
 

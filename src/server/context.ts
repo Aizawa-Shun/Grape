@@ -7,7 +7,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
  * their dependencies explicitly so they can be unit tested with fakes, and
  * that property is worth more than avoiding one piece of ambient state.
  *
- * Node-only: middleware runs on the Edge runtime and cannot see this store,
+ * Node-only: proxy.ts runs on the Edge runtime and cannot see this store,
  * which is why it mints the id into a header and the route wrapper — running
  * under `runtime = "nodejs"` — is what opens the scope.
  */

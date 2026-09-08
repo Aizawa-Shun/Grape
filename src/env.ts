@@ -101,7 +101,7 @@ const EnvSchema = z.object({
 
   /**
    * Guards the dashboard. Unset is allowed and means "localhost only" — see
-   * src/middleware.ts. It stops being optional the moment the app is reachable
+   * src/proxy.ts. It stops being optional the moment the app is reachable
    * from anywhere else.
    */
   GRAPE_ADMIN_PASSWORD: z.string().optional(),

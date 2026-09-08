@@ -1,10 +1,10 @@
 /**
  * A signed session cookie, using Web Crypto only.
  *
- * Web Crypto rather than node:crypto because this has to run in middleware,
+ * Web Crypto rather than node:crypto because this has to run in proxy.ts,
  * which Next executes on the Edge runtime where node builtins are unavailable.
  * The same code works unchanged under Node, so the login route and the
- * middleware share one implementation.
+ * proxy share one implementation.
  *
  * There is no user identity in the token because there is no second user. The
  * payload is just an expiry, signed; the whole question being answered is
