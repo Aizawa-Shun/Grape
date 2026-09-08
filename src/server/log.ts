@@ -1,4 +1,4 @@
-import { env } from "@/env";
+import { currentSettings } from "@/core/settings";
 
 import { currentRequestId } from "./context";
 
@@ -50,7 +50,7 @@ function indent(block: string): string {
 }
 
 function emit(level: Level, event: string, fields: LogFields = {}): void {
-  if (RANK[level] < RANK[env.GRAPE_LOG_LEVEL]) return;
+  if (RANK[level] < RANK[currentSettings().GRAPE_LOG_LEVEL]) return;
 
   const record: Record<string, unknown> = {
     t: new Date().toISOString(),

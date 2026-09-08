@@ -277,3 +277,22 @@ export const outcomes = sqliteTable(
   },
   (t) => [index("outcomes_task_idx").on(t.taskId)],
 );
+
+/**
+ * Settings a person can change from the web, layered over the values in .env.
+ *
+ * Only exists because editing `.env` cannot take effect without a restart —
+ * `parseEnv(process.env)` runs once at import — so a settings screen that
+ * wrote to that file would appear to save while changing nothing.
+ *
+ * Deliberately not a home for secrets or for GRAPE_ACTION_DRY_RUN: see
+ * core/settings for which keys are allowed and why.
+ */
+export const settings = sqliteTable("settings", {
+  key: text("key").primaryKey(),
+  /** Stored as text and re-validated through the env schema on the way out. */
+  value: text("value").notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});

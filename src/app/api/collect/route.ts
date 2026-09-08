@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { readTextCapped } from "@/core/net/read";
 import { db, dbReady, schema } from "@/db/client";
-import { env } from "@/env";
+import { currentSettings } from "@/core/settings";
 import { describeError, log } from "@/server/log";
 import { clientAddress, takeToken } from "@/server/rate-limit";
 
@@ -185,7 +185,9 @@ let pruning = false;
 function schedulePrune(): void {
   if (pruning || Math.random() >= 0.001) return;
   pruning = true;
-  const cutoff = new Date(Date.now() - env.GRAPE_EVENT_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  const cutoff = new Date(
+    Date.now() - currentSettings().GRAPE_EVENT_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+  );
 
   void db
     .delete(schema.events)

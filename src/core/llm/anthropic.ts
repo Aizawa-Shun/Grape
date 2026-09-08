@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 
-import { env } from "@/env";
+import { currentSettings } from "@/core/settings";
 
 import {
   EFFORT_BY_KIND,
@@ -52,7 +52,7 @@ export class AnthropicProvider implements LLMProvider {
     // adapters now bounded by LLM_TIMEOUT_MS, leaving this one to differ would
     // mean retry and timeout behaviour varying by provider — the exact thing
     // the provider interface exists to hide.
-    const shared = { timeout: options.timeoutMs ?? env.LLM_TIMEOUT_MS, maxRetries: 1 };
+    const shared = { timeout: options.timeoutMs ?? currentSettings().LLM_TIMEOUT_MS, maxRetries: 1 };
     // A bare constructor resolves ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or an
     // `ant auth login` profile on its own; only override when a key is given.
     this.#client = new Anthropic(
@@ -170,7 +170,7 @@ export class AnthropicProvider implements LLMProvider {
         },
         // A health check that can block for the full request timeout is not a
         // health check.
-        { timeout: env.LLM_HEALTH_TIMEOUT_MS, maxRetries: 0 },
+        { timeout: currentSettings().LLM_HEALTH_TIMEOUT_MS, maxRetries: 0 },
       );
       const text = response.content
         .filter((block) => block.type === "text")

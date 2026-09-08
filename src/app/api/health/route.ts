@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getProvider } from "@/core/llm";
 import { dbReady, sqlClient } from "@/db/client";
 import { describeMigrationStatus, migrationStatus, readJournal } from "@/db/migration-status";
+import { loadSettings } from "@/core/settings";
 import { env } from "@/env";
 import { readSession, sessionSecret } from "@/server/session";
 
@@ -33,10 +34,13 @@ export async function GET(request: Request) {
   const wantsLlm = new URL(request.url).searchParams.get("llm") !== "0";
 
   await dbReady;
+  // The effective configuration, which is what someone debugging needs to see
+  // — not what .env happens to say underneath an override.
+  const settings = await loadSettings();
   const database = await checkDatabase();
   const llm = wantsLlm
     ? await getProvider().health()
-    : { ok: true, provider: env.LLM_PROVIDER, model: "(skipped)", detail: "skipped via ?llm=0" };
+    : { ok: true, provider: settings.LLM_PROVIDER, model: "(skipped)", detail: "skipped via ?llm=0" };
 
   const ok = database.ok && llm.ok;
 
@@ -46,10 +50,10 @@ export async function GET(request: Request) {
       database,
       llm,
       config: {
-        provider: env.LLM_PROVIDER,
-        ingestBaseUrl: env.INGEST_BASE_URL,
+        provider: settings.LLM_PROVIDER,
+        ingestBaseUrl: settings.INGEST_BASE_URL,
         actionDryRun: env.GRAPE_ACTION_DRY_RUN,
-        coldStartMinSessions: env.COLD_START_MIN_SESSIONS,
+        coldStartMinSessions: settings.COLD_START_MIN_SESSIONS,
       },
     },
     { status: ok ? 200 : 503 },

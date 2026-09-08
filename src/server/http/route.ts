@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { toAppError } from "@/core/errors";
+import { loadSettings } from "@/core/settings";
 import { dbReady } from "@/db/client";
 
 import { runWithRequestId } from "../context";
@@ -39,6 +40,14 @@ export function route<Ctx>(
         // Cheap after the first call; guarantees no handler queries the
         // database before its pragmas are applied.
         await dbReady;
+        // Warms the settings cache so the synchronous readers — log.ts most of
+        // all — see the stored overrides rather than the .env defaults. A
+        // stored value that no longer validates must not take the request down
+        // with it: loadSettings has already fallen back to .env by this point,
+        // so noting it and carrying on is the correct response.
+        await loadSettings().catch((error: unknown) =>
+          log.warn("settings.unusable", describeError(error)),
+        );
         const response = await handler(request, context);
         log.info("request", {
           route: name,

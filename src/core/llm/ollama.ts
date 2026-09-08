@@ -1,4 +1,4 @@
-import { env } from "@/env";
+import { currentSettings } from "@/core/settings";
 
 import { fetchModel } from "./http";
 import { stripThinkBlocks, toProviderJsonSchema } from "./json-schema";
@@ -50,8 +50,8 @@ export class OllamaProvider implements LLMProvider {
   }) {
     this.model = options.model;
     this.#baseUrl = options.baseUrl.replace(/\/+$/, "");
-    this.#timeoutMs = options.timeoutMs ?? env.LLM_TIMEOUT_MS;
-    this.#maxAttempts = (options.maxRepairs ?? env.LLM_MAX_REPAIRS) + 1;
+    this.#timeoutMs = options.timeoutMs ?? currentSettings().LLM_TIMEOUT_MS;
+    this.#maxAttempts = (options.maxRepairs ?? currentSettings().LLM_MAX_REPAIRS) + 1;
   }
 
   async #chat(req: CompletionRequest, format?: unknown): Promise<{ text: string; usage: Usage; model: string }> {
@@ -120,7 +120,7 @@ export class OllamaProvider implements LLMProvider {
       const response = await fetchModel(
         `${this.#baseUrl}/api/tags`,
         {},
-        { timeoutMs: env.LLM_HEALTH_TIMEOUT_MS, provider: this.name },
+        { timeoutMs: currentSettings().LLM_HEALTH_TIMEOUT_MS, provider: this.name },
       );
       if (!response.ok) {
         return {

@@ -1,7 +1,7 @@
 import { and, eq, gte, lte } from "drizzle-orm";
 
 import { AppError } from "@/core/errors";
-import { env } from "@/env";
+import { currentSettings } from "@/core/settings";
 import { db, schema } from "@/db/client";
 
 /**
@@ -285,6 +285,6 @@ export async function getFunnelForRange(
     windowStart,
     windowEnd,
     keyEventName: product.keyEventName,
-    coldStartMinSessions: env.COLD_START_MIN_SESSIONS,
+    coldStartMinSessions: currentSettings().COLD_START_MIN_SESSIONS,
   });
 }
