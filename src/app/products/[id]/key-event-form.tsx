@@ -1,7 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useTransition } from "react";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Field, controlClass } from "@/components/ui/field";
+import { Status } from "@/components/ui/status";
 
 interface Props {
   productId: string;
@@ -9,94 +14,103 @@ interface Props {
 }
 
 /**
- * The Activate stage of the funnel (core/data/funnel.ts) has nothing to
- * measure until the product owner names the one event that counts as
- * activation — "signup", "project_created", whatever it is for this product.
- * Until this is set, Activate and Retain both read as zero, which is a
- * config gap, not a growth problem, so it needs to be obvious and easy to fix
- * from here rather than buried in .env.
+ * Until the owner names the one action that counts as "used it" — signup,
+ * project_created, whatever this product's is — two of the five stages have
+ * nothing to measure and read as zero. That is a setup gap, not a growth
+ * problem, so it says so in those words rather than reporting an empty funnel.
  */
 export function KeyEventForm({ productId, keyEventName }: Props) {
   const router = useRouter();
   const [value, setValue] = useState(keyEventName ?? "");
   const [editing, setEditing] = useState(false);
-  const [status, setStatus] = useState<"idle" | "saving" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
 
-  async function handleSave() {
-    setStatus("saving");
+  function save() {
     setError(null);
-    try {
+    startTransition(async () => {
       const response = await fetch(`/api/products/${productId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ keyEventName: value.trim() || null }),
       });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? `Request failed (${response.status})`);
+      const body = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        setError(body.error ?? "保存できませんでした。");
+        return;
+      }
       setEditing(false);
-      setStatus("idle");
       router.refresh();
-    } catch (err) {
-      setStatus("error");
-      setError(err instanceof Error ? err.message : String(err));
-    }
+    });
   }
 
   if (!editing) {
     return (
-      <div className="flex items-center justify-between gap-2 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
         {keyEventName ? (
-          <span>
-            キーイベント: <code className="rounded bg-zinc-100 px-1.5 py-0.5 dark:bg-zinc-800">{keyEventName}</code>
+          <span className="text-text-muted">
+            ゴールの操作:{" "}
+            <code className="rounded bg-surface-sunken px-1.5 py-0.5 font-mono text-text">
+              {keyEventName}
+            </code>
           </span>
         ) : (
-          <span className="text-amber-700 dark:text-amber-500">
-            キーイベント未設定 — Activate / Retain を計測できません
+          <span className="flex flex-wrap items-center gap-2">
+            <Badge tone="attention">未設定</Badge>
+            <span className="text-text-muted">
+              ゴールの操作を決めるまで「使ってもらう」と「また来てもらう」は数えられません
+            </span>
           </span>
         )}
-        <button
-          onClick={() => setEditing(true)}
-          className="shrink-0 rounded-md border border-zinc-300 px-2 py-1 text-xs dark:border-zinc-700"
-        >
-          {keyEventName ? "変更" : "設定する"}
-        </button>
+        <Button size="sm" onClick={() => setEditing(true)}>
+          {keyEventName ? "変更する" : "決める"}
+        </Button>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex gap-2">
-        <input
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder="signup"
-          className="flex-1 rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900"
-        />
-        <button
-          onClick={handleSave}
-          disabled={status === "saving"}
-          className="shrink-0 rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
-        >
-          {status === "saving" ? "保存中…" : "保存"}
-        </button>
-        <button
+    <div className="flex flex-col gap-3">
+      <Field
+        label="ゴールの操作"
+        hint={
+          <>
+            「ここまで来たら使ってもらえた」と言える操作に、名前を1つ付けます。サイトに貼ったコードの{" "}
+            <code className="font-mono">grape(&apos;track&apos;, &apos;{value.trim() || "signup"}&apos;)</code>{" "}
+            と同じ名前にしてください。
+          </>
+        }
+      >
+        {(props) => (
+          <input
+            {...props}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="signup"
+            className={controlClass}
+          />
+        )}
+      </Field>
+
+      {error && <Status tone="error">{error}</Status>}
+
+      <div className="flex flex-wrap gap-2">
+        <Button variant="primary" size="sm" onClick={save} loading={pending}>
+          {pending ? "保存中…" : "保存する"}
+        </Button>
+        <Button
+          size="sm"
+          disabled={pending}
           onClick={() => {
             setValue(keyEventName ?? "");
             setEditing(false);
-            setStatus("idle");
+            setError(null);
           }}
-          disabled={status === "saving"}
-          className="shrink-0 rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700"
         >
-          キャンセル
-        </button>
+          やめる
+        </Button>
       </div>
-      <p className="text-xs text-zinc-400">
-        スニペットの <code>grape(&apos;track&apos;, &apos;{value.trim() || "signup"}&apos;)</code> と一致させてください。
-      </p>
-      {status === "error" && error && <p className="text-sm text-red-600">{error}</p>}
     </div>
   );
 }

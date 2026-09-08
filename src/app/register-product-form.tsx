@@ -1,68 +1,68 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useTransition } from "react";
+
+import { Button } from "@/components/ui/button";
+import { controlClass } from "@/components/ui/field";
+import { Status } from "@/components/ui/status";
 
 /**
- * Registration is synchronous (crawl + extraction can take from a few seconds
- * on the API to a couple of minutes on a local model — see .env.example), so
- * this form has to hold its own loading state rather than relying on a page
- * transition to show progress.
+ * Registration is synchronous — reading the site and working out what it is
+ * takes seconds on the API and can take minutes on a local model — so this
+ * form has to show its own progress rather than relying on a page transition.
  */
 export function RegisterProductForm() {
   const router = useRouter();
   const [url, setUrl] = useState("");
-  const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
 
-  async function handleSubmit(event: React.FormEvent) {
+  function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    setStatus("loading");
     setError(null);
 
-    try {
+    startTransition(async () => {
       const response = await fetch("/api/products", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ url }),
       });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? `Request failed (${response.status})`);
+      const body = await response.json().catch(() => ({}));
 
+      if (!response.ok) {
+        setError(body.error ?? "登録できませんでした。もう一度お試しください。");
+        return;
+      }
       router.push(`/products/${body.productId}`);
       router.refresh();
-    } catch (err) {
-      setStatus("error");
-      setError(err instanceof Error ? err.message : String(err));
-    }
+    });
   }
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-      <div className="flex gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row">
         <input
           type="url"
           required
+          aria-label="サービスのURL"
           placeholder="https://your-product.com"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          disabled={status === "loading"}
-          className="flex-1 rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900"
+          disabled={pending}
+          className={controlClass}
         />
-        <button
-          type="submit"
-          disabled={status === "loading"}
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
-        >
-          {status === "loading" ? "解析中…" : "登録"}
-        </button>
+        <Button type="submit" variant="primary" loading={pending} className="sm:shrink-0">
+          {pending ? "読み込み中…" : "追加する"}
+        </Button>
       </div>
-      {status === "loading" && (
-        <p className="text-sm text-zinc-500">
-          サイトをクロールし、Product Contextを抽出しています。ローカルモデルの場合は数分かかることがあります。
-        </p>
+
+      {pending && (
+        <Status>
+          サイトを読んで、何のサービスかを整理しています。手元のモデルを使っている場合は数分かかることがあります。
+        </Status>
       )}
-      {status === "error" && error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <Status tone="error">{error}</Status>}
     </form>
   );
 }
