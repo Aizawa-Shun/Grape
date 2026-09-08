@@ -1,26 +1,106 @@
 @import "tailwindcss";
 
+/*
+ * Semantic names, not palette names. Components ask for "the muted text
+ * colour", never for "zinc-400", which is why they need no `dark:` variants:
+ * the value behind the name changes, the markup does not.
+ *
+ * Every text colour here clears WCAG AA (4.5:1) against the surface it sits
+ * on. The zinc-400 this replaced was 2.6:1 on white.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+  --surface: #ffffff;
+  --surface-sunken: #fafafa;
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --text: #18181b;
+  --text-muted: #52525b;
+  --text-subtle: #6b6b74;
+
+  --accent: #18181b;
+  --accent-fg: #ffffff;
+
+  /* The stage that is losing people, and anything else that needs a look. */
+  --attention: #b45309;
+  --attention-bg: #fffbeb;
+  --attention-border: #fcd34d;
+
+  /* Outcome moved the right way / the wrong way. */
+  --positive: #047857;
+  --negative: #b91c1c;
+
+  --focus: #2563eb;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --surface: #09090b;
+    --surface-sunken: #18181b;
+    --border: #27272a;
+    --border-strong: #3f3f46;
+
+    --text: #fafafa;
+    --text-muted: #a1a1aa;
+    --text-subtle: #8b8b93;
+
+    --accent: #fafafa;
+    --accent-fg: #18181b;
+
+    --attention: #fbbf24;
+    --attention-bg: #221b09;
+    --attention-border: #57431a;
+
+    --positive: #34d399;
+    --negative: #f87171;
+
+    --focus: #60a5fa;
   }
 }
 
+/*
+ * `inline` matters: the utilities emit `var(--surface)` rather than baking in
+ * today's value, so the media query above is what actually flips the theme.
+ */
+@theme inline {
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-text-subtle: var(--text-subtle);
+
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+
+  --color-attention: var(--attention);
+  --color-attention-bg: var(--attention-bg);
+  --color-attention-border: var(--attention-border);
+
+  --color-positive: var(--positive);
+  --color-negative: var(--negative);
+
+  --color-focus: var(--focus);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  /* Retunes every existing `rounded-md` at once instead of renaming classes. */
+  --radius-md: 0.5rem;
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--surface);
+  color: var(--text);
+  /*
+   * Geist is loaded with the latin subset only, so it covers none of this
+   * UI's Japanese. Naming the system Japanese faces explicitly is the
+   * difference between deliberate typography and whatever the browser
+   * happens to fall back to. (The previous `font-family: Arial` here was
+   * silently overriding Geist entirely.)
+   */
+  font-family: var(--font-geist-sans), "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+    "Yu Gothic UI", "Yu Gothic", Meiryo, ui-sans-serif, system-ui, sans-serif;
 }
