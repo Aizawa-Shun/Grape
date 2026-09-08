@@ -1,3 +1,8 @@
 ignoredBuiltDependencies:
   - sharp
   - unrs-resolver
+
+# Note: better-sqlite3 is deliberately NOT a dependency. It has no usable
+# prebuild for this platform and falls back to `node-gyp rebuild`, which needs a
+# C++ toolchain this machine does not have. @libsql/client ships N-API prebuilds
+# and is what src/db/client.ts uses instead.

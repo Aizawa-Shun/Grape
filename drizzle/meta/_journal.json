@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1788778108043,
+      "tag": "0000_fluffy_george_stacy",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1788779607137,
+      "tag": "0001_spotty_dark_phoenix",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788791456426,
+      "tag": "0002_glorious_ultron",
+      "breakpoints": true
+    }
+  ]
+}

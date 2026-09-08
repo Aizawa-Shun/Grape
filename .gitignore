@@ -32,6 +32,16 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...but the template has no secrets in it and every checkout needs it.
+!.env.example
+
+# local database
+*.db
+*.db-shm
+*.db-wal
+
+# machine-local agent permissions (absolute paths, not portable)
+.claude/
 
 # vercel
 .vercel
