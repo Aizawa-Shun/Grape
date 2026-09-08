@@ -4,6 +4,7 @@ import { getProvider } from "@/core/llm";
 import { dbReady, sqlClient } from "@/db/client";
 import { describeMigrationStatus, migrationStatus, readJournal } from "@/db/migration-status";
 import { env } from "@/env";
+import { readSession, sessionSecret } from "@/server/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,6 +16,20 @@ export const dynamic = "force-dynamic";
  * is up without spending a token.
  */
 export async function GET(request: Request) {
+  // Public so that an uptime check needs no credentials — but a public
+  // endpoint should not hand a stranger the ingest URL, the provider and the
+  // model name, nor let them spend a token by asking for the LLM probe.
+  const secret = await sessionSecret(env.GRAPE_SESSION_SECRET, env.GRAPE_ADMIN_PASSWORD);
+  const session = secret
+    ? await readSession(request.headers.get("cookie")?.match(/grape_session=([^;]+)/)?.[1], secret)
+    : { valid: true, shouldRenew: false };
+
+  if (!session.valid) {
+    await dbReady;
+    const { ok } = await checkDatabase();
+    return NextResponse.json({ ok }, { status: ok ? 200 : 503 });
+  }
+
   const wantsLlm = new URL(request.url).searchParams.get("llm") !== "0";
 
   await dbReady;

@@ -99,6 +99,15 @@ const EnvSchema = z.object({
    */
   GRAPE_EVENT_RETENTION_DAYS: z.coerce.number().int().positive().default(180),
 
+  /**
+   * Guards the dashboard. Unset is allowed and means "localhost only" — see
+   * src/middleware.ts. It stops being optional the moment the app is reachable
+   * from anywhere else.
+   */
+  GRAPE_ADMIN_PASSWORD: z.string().optional(),
+  /** Defaults to a value derived from the password, so one variable is enough. */
+  GRAPE_SESSION_SECRET: z.string().optional(),
+
   // --- Operations ---------------------------------------------------------
   GRAPE_LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 
