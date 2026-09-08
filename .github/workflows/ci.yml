@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      # Every value here has a default in src/env.ts, but pinning them keeps CI
+      # from silently depending on whatever the defaults happen to be.
+      DATABASE_URL: file:./ci.db
+      # ollama needs no credentials. Nothing in this job actually calls a model —
+      # the provider is only constructed, never invoked.
+      LLM_PROVIDER: ollama
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # playwright is a dependency but its browser download is not needed: the
+      # import in render.ts is lazy and soft-fails, and nothing here crawls.
+      - run: pnpm install --frozen-lockfile
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+      - run: pnpm lint
+
+      - run: pnpm typecheck
+
+      - run: pnpm test
+
+      # Also proves the migrations still apply to an empty database, which is
+      # the one thing no unit test covers and the one thing a bad migration
+      # breaks for everyone who pulls.
+      - run: pnpm db:migrate
+
+      - run: pnpm build

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { db, schema } from "@/db/client";
@@ -90,9 +91,9 @@ export default async function ProductPage({
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-6 py-16">
       <header className="flex flex-col gap-1">
-        <a href="/" className="text-sm text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
+        <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
           ← ダッシュボード
-        </a>
+        </Link>
         <h1 className="text-2xl font-semibold tracking-tight">{product.name}</h1>
         <a
           href={product.url}

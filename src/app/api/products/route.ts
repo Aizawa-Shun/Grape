@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { registerProduct } from "@/core/product/register";
-import { db, schema } from "@/db/client";
+import { db } from "@/db/client";
 
 export const runtime = "nodejs";
 
