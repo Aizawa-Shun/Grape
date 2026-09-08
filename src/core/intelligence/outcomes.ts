@@ -19,7 +19,7 @@ import type { FunnelResult } from "@/core/data/funnel";
 export type Outcome = typeof schema.outcomes.$inferSelect;
 
 /** How long to wait, before and after completion, for a fair comparison. Matches the retention window's own 7-day convention. */
-const DEFAULT_WINDOW_DAYS = 7;
+export const DEFAULT_WINDOW_DAYS = 7;
 
 export function sessionsForStage(funnel: FunnelResult, stage: FunnelStage): number {
   // Reach has no row of its own in funnel.stages — by construction every
