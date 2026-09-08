@@ -1,8 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useTransition } from "react";
 
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Callout } from "@/components/ui/callout";
+import { Status } from "@/components/ui/status";
+import { STAGE_UI } from "@/core/data/stages";
 import type { Task } from "@/core/intelligence/recommend";
 
 type Artifact = { id: string; kind: string; content: string; createdAt: Date };
@@ -21,168 +26,158 @@ interface Props {
   actionRun: ActionRun | null;
   costEstimateUsd: number | null;
   outcome: Outcome | null;
+  /** Whether a real send is possible at all right now — GRAPE_ACTION_DRY_RUN. */
+  dryRun: boolean;
 }
 
-function formatRating(n: number): string {
+const CHANNEL_COPY: Record<string, { where: string; note: string }> = {
+  manual: {
+    where: "自分で使う",
+    note: "Grapeからは何も送りません。できた文面をコピーして、自分で貼ってください。",
+  },
+  x: {
+    where: "Xに投稿",
+    note: "あなたのXアカウントから実際に投稿されます。取り消せません。",
+  },
+};
+
+function rating(n: number): string {
   return "●".repeat(n) + "○".repeat(5 - n);
 }
 
-function runErrorMessage(run: ActionRun): string | null {
+function failureMessage(run: ActionRun): string | null {
   if (run.status !== "failed") return null;
   const response = run.response;
   if (response && typeof response === "object" && "error" in response) {
     return String((response as { error: unknown }).error);
   }
-  return "実行に失敗しました。";
+  return "実行できませんでした。";
 }
 
 /**
- * One task's whole lifecycle in place: generate an artifact, see its cost
- * estimate, approve it (which is also where GRAPE_ACTION_DRY_RUN actually
- * takes effect — see execute.ts), or skip it outright. A failed run leaves
- * the task retryable rather than dead, so "承認して実行" stays available.
+ * One task, from proposal to measured result.
+ *
+ * The approval step expands in place rather than opening a dialog: it has to
+ * show what is about to happen, where, and what it costs, and an inline block
+ * gets that right without hand-rolling a focus trap. Two deliberate presses,
+ * because on the X channel the second one spends money and cannot be undone.
  */
-export function TaskCard({ task, artifact, actionRun, costEstimateUsd, outcome }: Props) {
+export function TaskCard({ task, artifact, actionRun, costEstimateUsd, outcome, dryRun }: Props) {
   const router = useRouter();
-  const [busy, setBusy] = useState<"generate" | "approve" | "skip" | "evaluate" | null>(null);
+  const [busy, setBusy] = useState<"generate" | "approve" | "skip" | "measure" | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
 
-  async function post(url: string, body?: unknown) {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: body ? { "content-type": "application/json" } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const responseBody = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(responseBody.error ?? `Request failed (${response.status})`);
-    return responseBody;
-  }
-
-  async function handleGenerate() {
-    setBusy("generate");
-    setError(null);
-    try {
-      await post(`/api/tasks/${task.id}/artifact`);
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function handleApprove() {
-    if (!artifact) return;
-    setBusy("approve");
-    setError(null);
-    try {
-      await post(`/api/tasks/${task.id}/approve`, { artifactId: artifact.id });
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function handleSkip() {
-    setBusy("skip");
-    setError(null);
-    try {
-      await post(`/api/tasks/${task.id}/skip`);
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function handleEvaluate() {
-    setBusy("evaluate");
-    setError(null);
-    try {
-      await post(`/api/tasks/${task.id}/outcome`);
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(null);
-    }
-  }
-
+  const channel = CHANNEL_COPY[task.channel] ?? { where: task.channel, note: "" };
   const done = task.status === "done";
   const skipped = task.status === "skipped";
-  const failure = actionRun ? runErrorMessage(actionRun) : null;
+  const failure = actionRun ? failureMessage(actionRun) : null;
+  const willReallySend = !dryRun && task.channel !== "manual";
+
+  function run(kind: NonNullable<typeof busy>, url: string, body?: unknown) {
+    setBusy(kind);
+    setError(null);
+    // The refresh runs inside the same transition as the request, so `pending`
+    // stays true until the re-rendered page is actually on screen. Without
+    // that the button returned to normal while nothing had visibly changed.
+    startTransition(async () => {
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: body ? { "content-type": "application/json" } : undefined,
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          setError(payload.error ?? "うまくいきませんでした。もう一度お試しください。");
+          return;
+        }
+        setConfirming(false);
+        router.refresh();
+      } finally {
+        setBusy(null);
+      }
+    });
+  }
 
   return (
-    <li className="flex flex-col gap-2 rounded-md border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
-      <div className="flex items-center justify-between gap-2">
-        <span className={`font-medium ${skipped ? "text-zinc-400 line-through" : ""}`}>{task.title}</span>
-        <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800">
-          {task.channel}
-        </span>
+    <li className="flex flex-col gap-3 rounded-md border border-border p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <h4 className={skipped ? "font-medium text-text-muted line-through" : "font-medium"}>
+          {task.title}
+        </h4>
+        <Badge>{channel.where}</Badge>
       </div>
 
-      {!skipped && (
+      {skipped ? (
+        <p className="text-sm text-text-muted">やらないことにしました。</p>
+      ) : (
         <>
-          <p className="text-zinc-500">{task.rationale}</p>
-          <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-zinc-400">
-            <span>
-              期待する変化: {task.expectedMetric} が{task.expectedDirection === "up" ? "上がる" : "下がる"}
-            </span>
-            <span>インパクト {formatRating(task.impact)}</span>
-            <span>労力 {formatRating(task.effort)}</span>
-          </div>
+          <p className="text-sm text-text-muted">{task.rationale}</p>
+          <dl className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-text-muted">
+            <div className="flex gap-1.5">
+              <dt>ねらい</dt>
+              <dd className="text-text">
+                {STAGE_UI[task.stage].label}を
+                {task.expectedDirection === "up" ? "増やす" : "減らす"}
+              </dd>
+            </div>
+            <div className="flex gap-1.5">
+              <dt>効きそうな度合い</dt>
+              <dd className="text-text">{rating(task.impact)}</dd>
+            </div>
+            <div className="flex gap-1.5">
+              <dt>かかる手間</dt>
+              <dd className="text-text">{rating(task.effort)}</dd>
+            </div>
+          </dl>
         </>
       )}
 
-      {skipped && <p className="text-xs text-zinc-400">スキップ済み</p>}
-
       {artifact && !skipped && (
-        <div className="rounded bg-zinc-50 px-2 py-1.5 text-xs dark:bg-zinc-900">
+        <div className="rounded-md bg-surface-sunken px-3 py-2.5 text-sm">
           <p className="whitespace-pre-wrap">{artifact.content}</p>
-          {costEstimateUsd !== null && costEstimateUsd > 0 && (
-            <p className="mt-1 text-zinc-400">推定コスト: ${costEstimateUsd.toFixed(3)}</p>
-          )}
         </div>
       )}
 
-      {done && actionRun && (
-        <p className="text-xs text-zinc-500">
-          {actionRun.status === "dry_run" && "ドライラン — 実際には送信されていません（GRAPE_ACTION_DRY_RUN=true）。"}
-          {actionRun.status === "sent" && (
+      {done && actionRun?.status === "dry_run" && (
+        <Status>
+          練習モードで実行しました。実際には送っていません。本当に送るには、設定ファイルで練習モードを解除してください。
+        </Status>
+      )}
+      {done && actionRun?.status === "sent" && (
+        <Status>
+          送信しました。
+          {actionRun.externalUrl && (
             <>
-              送信済み。
-              {actionRun.externalUrl && (
-                <>
-                  {" "}
-                  <a
-                    href={actionRun.externalUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="underline"
-                  >
-                    投稿を見る
-                  </a>
-                </>
-              )}
+              {" "}
+              <a
+                href={actionRun.externalUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline"
+              >
+                投稿を見る
+              </a>
             </>
           )}
-        </p>
+        </Status>
       )}
 
       {done && outcome && (
-        <p className="text-xs text-zinc-500">
-          効果測定（{outcome.windowDays}日後）: {outcome.before} → {outcome.after}
-          {" "}
+        <p className="text-sm">
+          <span className="text-text-muted">
+            {outcome.windowDays}日後の{STAGE_UI[task.stage].label}:{" "}
+          </span>
+          {outcome.before} 人 → {outcome.after} 人{" "}
           <span
             className={
               outcome.delta > 0
-                ? "text-emerald-600 dark:text-emerald-400"
+                ? "text-positive"
                 : outcome.delta < 0
-                  ? "text-red-500"
-                  : ""
+                  ? "text-negative"
+                  : "text-text-muted"
             }
           >
             ({outcome.delta > 0 ? "+" : ""}
@@ -191,46 +186,96 @@ export function TaskCard({ task, artifact, actionRun, costEstimateUsd, outcome }
         </p>
       )}
 
-      {done && !outcome && (
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleEvaluate}
-            disabled={busy !== null}
-            className="rounded-md border border-zinc-300 px-2 py-1 text-xs disabled:opacity-50 dark:border-zinc-700"
+      {failure && <Status tone="error">{failure}</Status>}
+      {error && <Status tone="error">{error}</Status>}
+
+      {confirming && artifact && (
+        <Callout tone={willReallySend ? "attention" : "info"} title="この内容で実行します">
+          <dl className="flex flex-col gap-1">
+            <div className="flex gap-2">
+              <dt className="text-text-muted">送り先</dt>
+              <dd className="font-medium">{channel.where}</dd>
+            </div>
+            <div className="flex gap-2">
+              <dt className="text-text-muted">かかる費用</dt>
+              <dd className="font-medium">
+                {costEstimateUsd && costEstimateUsd > 0
+                  ? `約 $${costEstimateUsd.toFixed(3)}`
+                  : "かかりません"}
+              </dd>
+            </div>
+          </dl>
+          <p className="mt-2">
+            {dryRun && task.channel !== "manual"
+              ? "いまは練習モードです。内容が記録されるだけで、実際には送られません。"
+              : channel.note}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              variant={willReallySend ? "danger" : "primary"}
+              size="sm"
+              loading={busy === "approve" && pending}
+              onClick={() =>
+                run("approve", `/api/tasks/${task.id}/approve`, { artifactId: artifact.id })
+              }
+            >
+              {willReallySend ? "本当に送る" : "実行する"}
+            </Button>
+            <Button size="sm" disabled={pending} onClick={() => setConfirming(false)}>
+              やめる
+            </Button>
+          </div>
+        </Callout>
+      )}
+
+      {!done && !skipped && !confirming && (
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            loading={busy === "generate" && pending}
+            disabled={pending}
+            onClick={() => run("generate", `/api/tasks/${task.id}/artifact`)}
           >
-            {busy === "evaluate" ? "測定中…" : "効果を測定"}
-          </button>
+            {busy === "generate" && pending
+              ? "文面を作っています…"
+              : artifact
+                ? "作り直す"
+                : "文面を作る"}
+          </Button>
+
+          {artifact && (
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={pending}
+              onClick={() => setConfirming(true)}
+            >
+              {failure ? "もう一度実行する" : "内容を確認して実行"}
+            </Button>
+          )}
+
+          <Button
+            variant="ghost"
+            size="sm"
+            loading={busy === "skip" && pending}
+            disabled={pending}
+            onClick={() => run("skip", `/api/tasks/${task.id}/skip`)}
+          >
+            やらない
+          </Button>
         </div>
       )}
 
-      {failure && <p className="text-xs text-red-600">{failure}</p>}
-      {error && <p className="text-xs text-red-600">{error}</p>}
-
-      {!done && !skipped && (
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={handleGenerate}
-            disabled={busy !== null}
-            className="rounded-md border border-zinc-300 px-2 py-1 text-xs disabled:opacity-50 dark:border-zinc-700"
+      {done && !outcome && (
+        <div>
+          <Button
+            size="sm"
+            loading={busy === "measure" && pending}
+            disabled={pending}
+            onClick={() => run("measure", `/api/tasks/${task.id}/outcome`)}
           >
-            {busy === "generate" ? "生成中…" : artifact ? "生成し直す" : "本文を生成"}
-          </button>
-          {artifact && (
-            <button
-              onClick={handleApprove}
-              disabled={busy !== null}
-              className="rounded-md bg-zinc-900 px-2 py-1 text-xs font-medium text-white disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
-            >
-              {busy === "approve" ? "実行中…" : failure ? "承認して再実行" : "承認して実行"}
-            </button>
-          )}
-          <button
-            onClick={handleSkip}
-            disabled={busy !== null}
-            className="rounded-md px-2 py-1 text-xs text-zinc-400 disabled:opacity-50"
-          >
-            {busy === "skip" ? "…" : "スキップ"}
-          </button>
+            {busy === "measure" && pending ? "測っています…" : "効果を測る"}
+          </Button>
         </div>
       )}
     </li>

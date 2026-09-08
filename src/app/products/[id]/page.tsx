@@ -107,7 +107,12 @@ export default async function ProductPage({
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium text-zinc-500">今週のボトルネックとタスク</h2>
-        <DiagnosisPanel productId={id} diagnosis={latestDiagnosis} tasks={tasks} />
+        <DiagnosisPanel
+          productId={id}
+          diagnosis={latestDiagnosis}
+          tasks={tasks}
+          dryRun={env.GRAPE_ACTION_DRY_RUN}
+        />
       </section>
 
       <section className="flex flex-col gap-3">

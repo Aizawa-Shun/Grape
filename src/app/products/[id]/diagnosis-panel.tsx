@@ -1,3 +1,5 @@
+import { Card } from "@/components/ui/card";
+import { STAGE_UI } from "@/core/data/stages";
 import type { Diagnosis } from "@/core/intelligence/diagnose";
 import type { Task } from "@/core/intelligence/recommend";
 
@@ -25,58 +27,62 @@ interface Props {
   productId: string;
   diagnosis: Diagnosis | null;
   tasks: TaskWithExtras[];
+  dryRun: boolean;
 }
 
-const STAGE_LABELS: Record<string, string> = {
-  reach: "Reach",
-  visit: "Visit",
-  engage: "Engage",
-  activate: "Activate",
-  retain: "Retain",
-};
-
 /**
- * The Decision layer's output plus, now that M4 exists, the Action layer's
- * controls — generate/approve/skip live in TaskCard per task. This panel is
- * just the diagnosis summary and the list.
+ * The finding, then what to do about it. The stage is stated as a sentence
+ * rather than as a labelled field, because "ボトルネック: Engage" requires
+ * knowing two things the reader has not been told.
  */
-export function DiagnosisPanel({ productId, diagnosis, tasks }: Props) {
+export function DiagnosisPanel({ productId, diagnosis, tasks, dryRun }: Props) {
   if (!diagnosis) {
     return (
-      <div className="flex flex-col gap-2">
-        <p className="text-sm text-zinc-400">まだ診断を実行していません。</p>
-        <RunDiagnosisButton productId={productId} />
+      <div className="flex flex-col gap-3">
+        <p className="text-sm text-text-muted">
+          まだ調べていません。人がまだ来ていなくても、サイト自体を見て何から始めるべきかは出せます。
+        </p>
+        <RunDiagnosisButton productId={productId} label="はじめて調べる" />
       </div>
     );
   }
 
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-2 rounded-md border border-zinc-200 px-3 py-3 dark:border-zinc-800">
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-zinc-400">
-            {diagnosis.mode === "audit" ? "サイト監査" : "ファネル診断"} ·{" "}
-            {diagnosis.createdAt.toLocaleString("ja-JP")}
-          </span>
-          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-400">
-            ボトルネック: {STAGE_LABELS[diagnosis.bottleneckStage] ?? diagnosis.bottleneckStage}
-          </span>
-        </div>
-        <p className="whitespace-pre-wrap text-sm">{diagnosis.summary}</p>
-        {diagnosis.confidence !== null && (
-          <span className="text-xs text-zinc-400">確信度: {(diagnosis.confidence * 100).toFixed(0)}%</span>
-        )}
-      </div>
+  const stage = STAGE_UI[diagnosis.bottleneckStage];
+  const open = tasks.filter((task) => task.status !== "done" && task.status !== "skipped");
 
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xs font-medium text-zinc-500">今週のタスク</h3>
-          <RunDiagnosisButton productId={productId} />
+  return (
+    <div className="flex flex-col gap-5">
+      <Card emphasis="attention" className="flex flex-col gap-2">
+        <p className="text-sm">
+          いま一番の問題は{" "}
+          <span className="font-semibold">「{stage.label}」</span> の段階です。
+        </p>
+        <p className="whitespace-pre-wrap text-sm">{diagnosis.summary}</p>
+        <p className="text-xs text-text-muted">
+          {diagnosis.mode === "audit"
+            ? "まだ訪問が少ないので、サイトの内容そのものを見て判断しました。"
+            : "実際の訪問データから判断しました。"}
+          {diagnosis.confidence !== null &&
+            `この説明の確からしさは ${Math.round(diagnosis.confidence * 100)}% です。`}
+          {" "}
+          {diagnosis.createdAt.toLocaleString("ja-JP")}
+        </p>
+      </Card>
+
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-medium text-text-muted">
+            {open.length > 0 ? `やること（残り${open.length}件）` : "やること"}
+          </h3>
+          <RunDiagnosisButton productId={productId} label="調べ直す" />
         </div>
+
         {tasks.length === 0 ? (
-          <p className="text-sm text-zinc-400">この診断からはタスクが生成されていません。</p>
+          <p className="text-sm text-text-muted">
+            この診断からは、やることが出ませんでした。もう一度調べ直してみてください。
+          </p>
         ) : (
-          <ul className="flex flex-col gap-2">
+          <ul className="flex flex-col gap-3">
             {tasks.map((task) => (
               <TaskCard
                 key={task.id}
@@ -85,6 +91,7 @@ export function DiagnosisPanel({ productId, diagnosis, tasks }: Props) {
                 actionRun={task.actionRun}
                 costEstimateUsd={task.costEstimateUsd}
                 outcome={task.outcome}
+                dryRun={dryRun}
               />
             ))}
           </ul>
