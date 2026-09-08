@@ -1,4 +1,5 @@
 import { Callout } from "@/components/ui/callout";
+import { Page, PageHeader, Section } from "@/components/ui/page";
 import {
   currentOverrides,
   loadSettings,
@@ -51,21 +52,15 @@ export default async function SettingsPage({
   ];
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-10 px-4 py-8 sm:px-6 sm:py-12">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold tracking-tight">設定</h1>
-        <p className="text-sm text-text-muted">
-          変更はすぐ反映されます。再起動は要りません。
-        </p>
-      </header>
+    <Page className="gap-10">
+      <PageHeader title="設定" description="変更はすぐ反映されます。再起動は要りません。" />
 
       {product ? (
-        <section className="flex flex-col gap-6">
-          <div className="flex flex-col gap-0.5">
-            <h2 className="text-sm font-medium">{product.name} の設定</h2>
-            <p className="text-xs text-text-muted">このサービスにだけ効きます。</p>
-          </div>
-
+        <Section
+          title={`${product.name} の設定`}
+          description="このサービスにだけ効きます。"
+          className="gap-5"
+        >
           <div className="flex flex-col gap-3">
             <h3 className="text-sm font-medium text-text-muted">ゴールの操作</h3>
             <KeyEventForm productId={product.id} keyEventName={product.keyEventName} />
@@ -75,7 +70,7 @@ export default async function SettingsPage({
             <h3 className="text-sm font-medium text-text-muted">計測用のコード</h3>
             <TrackingSnippet productId={product.id} ingestBaseUrl={settings.INGEST_BASE_URL} />
           </div>
-        </section>
+        </Section>
       ) : (
         <Callout>
           サービスをまだ登録していないので、サービスごとの設定はありません。
@@ -94,16 +89,16 @@ export default async function SettingsPage({
 
       <div className="border-t border-border" />
 
-      <section className="flex flex-col gap-3">
-        <div className="flex flex-col gap-0.5">
-          <h2 className="text-sm font-medium">ここでは変えられないもの</h2>
-          <p className="text-xs text-text-muted">
+      <Section
+        title="ここでは変えられないもの"
+        description={
+          <>
             鍵と、お金が動く操作のブレーキです。<code className="font-mono">.env</code>{" "}
             を直接編集して、サーバーを再起動してください。
-          </p>
-        </div>
-
-        <dl className="flex flex-col divide-y divide-border rounded-md border border-border text-sm">
+          </>
+        }
+      >
+        <dl className="flex flex-col divide-y divide-border overflow-hidden rounded-md border border-border text-sm shadow-card">
           <div className="flex items-center justify-between gap-3 px-3 py-2.5">
             <dt>
               練習モード
@@ -129,7 +124,7 @@ export default async function SettingsPage({
             訪問データの受け取り先は公開アドレスになっています。
           </p>
         )}
-      </section>
-    </div>
+      </Section>
+    </Page>
   );
 }

@@ -121,8 +121,14 @@ export function BriefingView({ briefing }: { briefing: Briefing }) {
   const quiet = briefing.step.kind === "waiting" || briefing.step.kind === "idle";
 
   return (
-    <div className="flex flex-col gap-5">
-      <p className="text-lg leading-snug">{briefing.headline}</p>
+    <div className="flex flex-col gap-4">
+      {/*
+        The page heading, not a lead paragraph. The home page used to open
+        with <h1>Grape</h1> — the app's own name, already in the sidebar —
+        which spent the most valuable line on the screen saying nothing. The
+        situation is what this page is actually about, so it is the h1.
+      */}
+      <h1 className="text-xl font-semibold leading-snug tracking-tight">{briefing.headline}</h1>
 
       {briefing.celebration && <CelebrationNote celebration={briefing.celebration} />}
 

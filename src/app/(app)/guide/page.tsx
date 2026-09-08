@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { Card } from "@/components/ui/card";
+import { Page, PageHeader } from "@/components/ui/page";
 import { STAGE_UI } from "@/core/data/stages";
 import type { FunnelStage } from "@/db/schema";
 
@@ -39,13 +40,8 @@ const LOOP = [
 
 export default function GuidePage() {
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-10 px-4 py-8 sm:px-6 sm:py-12">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold tracking-tight">使い方ガイド</h1>
-        <p className="text-sm text-text-muted">
-          Grapeの使い方と、出てくる言葉の意味。
-        </p>
-      </header>
+    <Page className="gap-10">
+      <PageHeader title="使い方ガイド" description="Grapeの使い方と、出てくる言葉の意味。" />
 
       <section className="flex flex-col gap-4">
         <h2 className="text-sm font-medium">ひと回りの流れ</h2>
@@ -119,6 +115,6 @@ export default function GuidePage() {
           ホームにもどる →
         </Link>
       </p>
-    </div>
+    </Page>
   );
 }

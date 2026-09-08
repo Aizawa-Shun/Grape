@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
+import { Page, Section } from "@/components/ui/page";
 import { STAGE_UI } from "@/core/data/stages";
 import { buildBriefing } from "@/core/product/briefing";
 import { loadSnapshots } from "@/core/product/next-step";
@@ -37,53 +38,57 @@ export default async function DashboardPage() {
   );
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-10 px-4 py-10 sm:px-6 sm:py-16">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Grape</h1>
-        <p className="mt-1 text-sm text-text-muted">
-          作ったサービスが使われない理由を調べて、次にやることを一つ出します。
-        </p>
-      </header>
-
+    <Page>
       <BriefingView briefing={briefing} />
 
       {snapshots.length > 0 && (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-medium text-text-muted">登録しているサービス</h2>
-          <ul className="flex flex-col divide-y divide-border rounded-md border border-border">
+        <Section title="登録しているサービス">
+          <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-md border border-border shadow-card">
             {snapshots.map((snapshot, i) => {
               const diagnosis = diagnoses[i];
               return (
                 <li key={snapshot.product.id}>
                   <Link
                     href={`/products/${snapshot.product.id}`}
-                    className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm hover:bg-surface-sunken"
+                    className="group flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm transition-colors hover:bg-surface-sunken"
                   >
-                    <span className="flex flex-col gap-0.5">
+                    <span className="flex min-w-0 flex-col gap-0.5">
                       <span className="font-medium">{snapshot.product.name}</span>
-                      <span className="text-text-muted">{snapshot.product.url}</span>
+                      <span className="truncate text-text-muted">{snapshot.product.url}</span>
                     </span>
-                    {diagnosis ? (
-                      <Badge tone="attention">
-                        {STAGE_UI[diagnosis.bottleneckStage].label}で詰まっています
-                      </Badge>
-                    ) : (
-                      <span className="text-xs text-text-muted">まだ調べていません</span>
-                    )}
+                    <span className="flex shrink-0 items-center gap-2">
+                      {diagnosis ? (
+                        <Badge tone="attention">
+                          {STAGE_UI[diagnosis.bottleneckStage].label}で詰まっています
+                        </Badge>
+                      ) : (
+                        <span className="text-xs text-text-muted">まだ調べていません</span>
+                      )}
+                      {/*
+                        Appears only on hover, so a row that is a link looks
+                        like one without the list becoming a column of arrows.
+                      */}
+                      <span
+                        aria-hidden="true"
+                        className="text-text-subtle opacity-0 transition-opacity group-hover:opacity-100"
+                      >
+                        →
+                      </span>
+                    </span>
                   </Link>
                 </li>
               );
             })}
           </ul>
-        </section>
+        </Section>
       )}
 
-      <section id="register" className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-text-muted">
-          {snapshots.length === 0 ? "サービスを登録する" : "別のサービスも見る"}
-        </h2>
+      <Section
+        id="register"
+        title={snapshots.length === 0 ? "サービスを登録する" : "別のサービスも見る"}
+      >
         <RegisterProductForm />
-      </section>
-    </div>
+      </Section>
+    </Page>
   );
 }

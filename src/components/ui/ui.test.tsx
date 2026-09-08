@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { Button } from "./button";
 import { Field, controlClass } from "./field";
+import { Meter } from "./meter";
 
 describe("Button", () => {
   it("blocks clicks while loading and says so out loud", async () => {
@@ -61,5 +62,45 @@ describe("Field", () => {
     const describedBy = input.getAttribute("aria-describedby");
     expect(describedBy).toBeTruthy();
     expect(document.getElementById(describedBy!)).toHaveTextContent("登録が完了したときに送る名前");
+  });
+});
+
+describe("Meter", () => {
+  it("says the rating in words, because the dots it replaced had to be counted", () => {
+    render(
+      <dl>
+        <Meter label="効きそうな度合い" value={3} />
+      </dl>,
+    );
+
+    expect(screen.getByText("効きそうな度合い")).toBeInTheDocument();
+    expect(screen.getByText("ふつう")).toBeInTheDocument();
+  });
+
+  it("pairs the label with its value, so the reading is not a loose caption", () => {
+    render(
+      <dl>
+        <Meter label="かかる手間" value={5} />
+      </dl>,
+    );
+
+    expect(screen.getByText("かかる手間").tagName).toBe("DT");
+    expect(screen.getByText("とても大きい").closest("dd")).not.toBeNull();
+  });
+
+  it("clamps a rating from outside 1-5 rather than drawing an empty or overrun bar", () => {
+    const { rerender } = render(
+      <dl>
+        <Meter label="効きそうな度合い" value={0} />
+      </dl>,
+    );
+    expect(screen.getByText("とても小さい")).toBeInTheDocument();
+
+    rerender(
+      <dl>
+        <Meter label="効きそうな度合い" value={9} />
+      </dl>,
+    );
+    expect(screen.getByText("とても大きい")).toBeInTheDocument();
   });
 });

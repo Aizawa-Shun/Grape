@@ -79,9 +79,9 @@ export function ContextEditor({ productId, initial, gaps, editedByHuman }: Props
         </Callout>
       )}
 
-      <div className="flex flex-col gap-4">
-        {FIELDS.map((field) =>
-          editing ? (
+      {editing ? (
+        <div className="flex flex-col gap-4">
+          {FIELDS.map((field) => (
             <Field key={field.key} label={field.label} hint={field.hint}>
               {(props) => (
                 <textarea
@@ -93,14 +93,28 @@ export function ContextEditor({ productId, initial, gaps, editedByHuman }: Props
                 />
               )}
             </Field>
-          ) : (
-            <div key={field.key} className="flex flex-col gap-1">
-              <h3 className="text-sm font-medium text-text-muted">{field.label}</h3>
-              <p className="whitespace-pre-wrap text-sm">{values[field.key]}</p>
+          ))}
+        </div>
+      ) : (
+        /*
+         * A spec table, not four stacked label/value pairs. It is a definition
+         * list in fact as well as in markup now, and pairing each label with
+         * its answer on one row turned roughly 200px of loose vertical stack
+         * into something that can be checked at a glance — which is the whole
+         * job of this screen.
+         */
+        <dl className="divide-y divide-border overflow-hidden rounded-md border border-border shadow-card">
+          {FIELDS.map((field) => (
+            <div
+              key={field.key}
+              className="grid gap-0.5 px-4 py-3 sm:grid-cols-[9.5rem_1fr] sm:gap-4"
+            >
+              <dt className="text-sm text-text-muted">{field.label}</dt>
+              <dd className="whitespace-pre-wrap text-sm">{values[field.key]}</dd>
             </div>
-          ),
-        )}
-      </div>
+          ))}
+        </dl>
+      )}
 
       {error && <Status tone="error">{error}</Status>}
 

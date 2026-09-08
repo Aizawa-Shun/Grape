@@ -13,7 +13,7 @@ interface Props {
 }
 
 const EMPHASIS = {
-  default: "border-border bg-surface",
+  default: "border-border bg-surface shadow-card",
   attention: "border-attention-border bg-attention-bg",
 } as const;
 

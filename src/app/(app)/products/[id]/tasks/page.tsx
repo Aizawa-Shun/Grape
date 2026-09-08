@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 
 import { estimateActionCostUsd } from "@/core/action/channel";
+import { Page, PageHeader } from "@/components/ui/page";
 import { db, schema } from "@/db/client";
 import { env } from "@/env";
 
@@ -62,13 +63,11 @@ export default async function TasksPage({ params }: { params: Promise<{ id: stri
   );
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 py-8 sm:px-6 sm:py-12">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold tracking-tight">診断とやること</h1>
-        <p className="text-sm text-text-muted">
-          いま何が一番の問題で、それに対して何をするか。
-        </p>
-      </header>
+    <Page>
+      <PageHeader
+        title="診断とやること"
+        description="いま何が一番の問題で、それに対して何をするか。"
+      />
 
       <DiagnosisPanel
         productId={id}
@@ -76,6 +75,6 @@ export default async function TasksPage({ params }: { params: Promise<{ id: stri
         tasks={tasks}
         dryRun={env.GRAPE_ACTION_DRY_RUN}
       />
-    </div>
+    </Page>
   );
 }

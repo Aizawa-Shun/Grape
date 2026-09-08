@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { Callout } from "@/components/ui/callout";
+import { Page, PageHeader } from "@/components/ui/page";
 import { getFunnel } from "@/core/data/funnel";
 import { db, schema } from "@/db/client";
 
@@ -36,13 +37,11 @@ export default async function FunnelPage({
   const funnel = await getFunnel(id, { windowDays });
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 py-8 sm:px-6 sm:py-12">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold tracking-tight">利用者の流れ</h1>
-        <p className="text-sm text-text-muted">
-          サイトに来た人が、どこまで進んで、どこで離れているか。
-        </p>
-      </header>
+    <Page>
+      <PageHeader
+        title="利用者の流れ"
+        description="サイトに来た人が、どこまで進んで、どこで離れているか。"
+      />
 
       {!product.keyEventName && (
         <Callout tone="attention">
@@ -55,6 +54,6 @@ export default async function FunnelPage({
       )}
 
       <FunnelView productId={id} funnel={funnel} windowDays={windowDays} />
-    </div>
+    </Page>
   );
 }

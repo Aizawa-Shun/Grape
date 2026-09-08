@@ -6,6 +6,8 @@ import { useState, useTransition } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
+import { cx } from "@/components/ui/cx";
+import { Meter } from "@/components/ui/meter";
 import { Status } from "@/components/ui/status";
 import { STAGE_UI } from "@/core/data/stages";
 import type { Task } from "@/core/intelligence/recommend";
@@ -40,10 +42,6 @@ const CHANNEL_COPY: Record<string, { where: string; note: string }> = {
     note: "あなたのXアカウントから実際に投稿されます。取り消せません。",
   },
 };
-
-function rating(n: number): string {
-  return "●".repeat(n) + "○".repeat(5 - n);
-}
 
 function failureMessage(run: ActionRun): string | null {
   if (run.status !== "failed") return null;
@@ -102,7 +100,17 @@ export function TaskCard({ task, artifact, actionRun, costEstimateUsd, outcome, 
   }
 
   return (
-    <li className="flex flex-col gap-3 rounded-md border border-border p-4">
+    <li
+      className={cx(
+        "flex flex-col gap-3 rounded-md border",
+        // A dropped task stays visible — you decided that, and it should be
+        // possible to see what you decided — but it stops competing with the
+        // ones still live: dashed, sunken, and no lift off the page.
+        skipped
+          ? "border-dashed border-border bg-surface-sunken/40 p-3"
+          : "border-border bg-surface p-4 shadow-card",
+      )}
+    >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <h4 className={skipped ? "font-medium text-text-muted line-through" : "font-medium"}>
           {task.title}
@@ -115,22 +123,16 @@ export function TaskCard({ task, artifact, actionRun, costEstimateUsd, outcome, 
       ) : (
         <>
           <p className="text-sm text-text-muted">{task.rationale}</p>
-          <dl className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-text-muted">
-            <div className="flex gap-1.5">
-              <dt>ねらい</dt>
-              <dd className="text-text">
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-md bg-surface-sunken px-3 py-2.5 sm:grid-cols-3">
+            <div className="flex flex-col gap-1">
+              <dt className="text-xs text-text-muted">ねらい</dt>
+              <dd className="text-xs">
                 {STAGE_UI[task.stage].label}を
                 {task.expectedDirection === "up" ? "増やす" : "減らす"}
               </dd>
             </div>
-            <div className="flex gap-1.5">
-              <dt>効きそうな度合い</dt>
-              <dd className="text-text">{rating(task.impact)}</dd>
-            </div>
-            <div className="flex gap-1.5">
-              <dt>かかる手間</dt>
-              <dd className="text-text">{rating(task.effort)}</dd>
-            </div>
+            <Meter label="効きそうな度合い" value={task.impact} />
+            <Meter label="かかる手間" value={task.effort} />
           </dl>
         </>
       )}

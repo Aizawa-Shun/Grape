@@ -178,13 +178,19 @@ export function SettingsForm({
   return (
     <div className="flex flex-col gap-8">
       {SECTIONS.map((section) => (
-        <section key={section.title} className="flex flex-col gap-4">
+        <section key={section.title} className="flex flex-col gap-3">
           <div className="flex flex-col gap-0.5">
             <h2 className="text-sm font-medium">{section.title}</h2>
             <p className="text-xs text-text-muted">{section.description}</p>
           </div>
 
-          <div className="flex flex-col gap-5">
+          {/*
+            One bordered group per section. As a plain run of inputs this page
+            was ~2,700px of undifferentiated column, and the section headings
+            read as just more text in it; a box is what makes "these four
+            belong together" visible while scrolling past.
+          */}
+          <div className="flex flex-col divide-y divide-border overflow-hidden rounded-md border border-border shadow-card">
             {section.fields.map((field) => (
               <Row
                 key={field.key}
@@ -206,10 +212,13 @@ export function SettingsForm({
         </section>
       ))}
 
-      {error && <Status tone="error">{error}</Status>}
-      {saved && !dirty && <Status>保存しました。次の操作から反映されます。</Status>}
-
-      <div className="flex flex-wrap items-center gap-3">
+      {/*
+        Pinned to the bottom of the viewport. The save button used to sit only
+        at the end of the form, so changing the first field meant scrolling
+        past every other one to commit it — and the page gives no other sign
+        that an edit is still uncommitted.
+      */}
+      <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center gap-3 border-t border-border bg-surface/90 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
         <Button variant="primary" onClick={save} loading={pending} disabled={!dirty}>
           {pending ? "保存しています…" : "保存する"}
         </Button>
@@ -224,6 +233,13 @@ export function SettingsForm({
             変更をやめる
           </Button>
         )}
+        {error ? (
+          <Status tone="error">{error}</Status>
+        ) : saved && !dirty ? (
+          <Status>保存しました。次の操作から反映されます。</Status>
+        ) : dirty ? (
+          <Status>まだ保存していません。</Status>
+        ) : null}
       </div>
     </div>
   );
@@ -252,7 +268,7 @@ function Row({
     focusRing;
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-1.5 px-4 py-3.5">
       <div className="flex flex-wrap items-center gap-2">
         <label htmlFor={id} className="text-sm font-medium">
           {field.label}

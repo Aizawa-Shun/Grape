@@ -1,6 +1,8 @@
 import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 
+import { Page, PageHeader, Section } from "@/components/ui/page";
+
 import { ContextEditor } from "./context-editor";
 
 import { db, schema } from "@/db/client";
@@ -31,30 +33,32 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   });
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-4 py-8 sm:px-6 sm:py-12">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold tracking-tight">{product.name}</h1>
-        <a
-          href={product.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-sm text-text-muted hover:underline"
-        >
-          {product.url}
-        </a>
-      </header>
+    <Page>
+      <PageHeader
+        title={product.name}
+        description={
+          <a
+            href={product.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:underline"
+          >
+            {product.url}
+          </a>
+        }
+      />
 
-      <section className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-sm font-medium text-text-muted">このサービスについて</h2>
-          {latest && (
+      <Section
+        title="このサービスについて"
+        actions={
+          latest && (
             <span className="text-xs text-text-muted">
               {versions.length}回目の内容
               {latest.editedByHuman ? "（あなたが修正）" : "（自動で作成）"}
             </span>
-          )}
-        </div>
-
+          )
+        }
+      >
         {latest ? (
           <ContextEditor
             productId={id}
@@ -65,11 +69,10 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
         ) : (
           <p className="text-sm text-text-muted">まだ内容がありません。</p>
         )}
-      </section>
+      </Section>
 
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium text-text-muted">読み取ったページ（{pages.length}）</h2>
-        <ul className="flex flex-col divide-y divide-border rounded-md border border-border text-sm">
+      <Section title={`読み取ったページ（${pages.length}）`}>
+        <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-md border border-border text-sm shadow-card">
           {pages.map((page) => (
             <li key={page.id} className="flex flex-col gap-1 px-3 py-2">
               <div className="flex items-center justify-between gap-2">
@@ -95,7 +98,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
             </li>
           ))}
         </ul>
-      </section>
-    </div>
+      </Section>
+    </Page>
   );
 }

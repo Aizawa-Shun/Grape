@@ -31,6 +31,13 @@
   --negative: #b91c1c;
 
   --focus: #2563eb;
+
+  /*
+   * Lifts a card just off the page. Deliberately near-invisible: the border
+   * still does the separating, and this only stops a screen of stacked
+   * outlines from reading as a wireframe.
+   */
+  --card-shadow: 0 1px 2px 0 rgb(24 24 27 / 0.04), 0 1px 3px 0 rgb(24 24 27 / 0.05);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -55,6 +62,9 @@
     --negative: #f87171;
 
     --focus: #60a5fa;
+
+    /* A shadow on near-black reads as mud; the border alone separates here. */
+    --card-shadow: none;
   }
 }
 
@@ -83,6 +93,8 @@
   --color-negative: var(--negative);
 
   --color-focus: var(--focus);
+
+  --shadow-card: var(--card-shadow);
 
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);

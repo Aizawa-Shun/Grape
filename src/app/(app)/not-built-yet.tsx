@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { Callout } from "@/components/ui/callout";
+import { Page, PageHeader } from "@/components/ui/page";
 
 /**
  * An honest destination for a menu item whose feature does not exist.
@@ -24,11 +25,8 @@ export function NotBuiltYet({
   insteadLabel?: string;
 }) {
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 py-8 sm:px-6 sm:py-12">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
-        <p className="text-sm text-text-muted">{summary}</p>
-      </header>
+    <Page>
+      <PageHeader title={title} description={summary} />
 
       <Callout title="この画面はまだありません">
         <p>Grapeはいま、あなたのパソコンの中だけで動いています。ここに入る予定のものはこちらです。</p>
@@ -46,6 +44,6 @@ export function NotBuiltYet({
           </Link>
         </p>
       )}
-    </div>
+    </Page>
   );
 }
