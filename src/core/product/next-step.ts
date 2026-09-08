@@ -2,7 +2,7 @@ import { eq, sql } from "drizzle-orm";
 
 import { DEFAULT_WINDOW_DAYS } from "@/core/intelligence/outcomes";
 import { db, schema, type Database } from "@/db/client";
-import type { Channel, TaskStatus } from "@/db/schema";
+import type { Channel, DiagnosisMode, FunnelStage, TaskStatus } from "@/db/schema";
 
 /**
  * What one person should do next, across everything they have registered.
@@ -44,14 +44,24 @@ export type NextStep =
   | { kind: "waiting"; product: StepProduct; task: StepTask; readyAt: Date }
   | { kind: "idle"; product: StepProduct };
 
+export interface TaskOutcome {
+  before: number;
+  after: number;
+  delta: number;
+  windowDays: number;
+  evaluatedAt: Date;
+}
+
 export interface TaskSnapshot {
   id: string;
   title: string;
   status: TaskStatus;
+  stage: FunnelStage;
   channel: Channel;
   completedAt: Date | null;
   hasArtifact: boolean;
-  hasOutcome: boolean;
+  /** The measured result, kept whole so the briefing can celebrate a good one. */
+  outcome: TaskOutcome | null;
 }
 
 export interface ProductSnapshot {
@@ -61,6 +71,9 @@ export interface ProductSnapshot {
   /** null when no Product Context exists at all. */
   contextEditedByHuman: boolean | null;
   latestDiagnosisAt: Date | null;
+  /** "audit" means it was decided from the site itself, for want of traffic. */
+  latestDiagnosisMode: DiagnosisMode | null;
+  latestBottleneckStage: FunnelStage | null;
   tasks: TaskSnapshot[];
 }
 
@@ -102,7 +115,7 @@ function stepFor(snapshot: ProductSnapshot, now: Date): NextStep {
   const measurable = tasks.find(
     (task) =>
       task.status === "done" &&
-      !task.hasOutcome &&
+      task.outcome === null &&
       task.completedAt !== null &&
       now.getTime() - task.completedAt.getTime() >= DEFAULT_WINDOW_DAYS * DAY_MS,
   );
@@ -124,7 +137,7 @@ function stepFor(snapshot: ProductSnapshot, now: Date): NextStep {
   if (!snapshot.keyEventName) return { kind: "set_key_event", product };
 
   const pending = tasks
-    .filter((task) => task.status === "done" && !task.hasOutcome && task.completedAt !== null)
+    .filter((task) => task.status === "done" && task.outcome === null && task.completedAt !== null)
     .sort((a, b) => a.completedAt!.getTime() - b.completedAt!.getTime())[0];
   if (pending) {
     return {
@@ -166,7 +179,7 @@ export async function loadSnapshots(database?: Database): Promise<ProductSnapsho
       const diagnosis = await conn.query.diagnoses.findFirst({
         where: eq(schema.diagnoses.productId, product.id),
         orderBy: (diagnoses, { desc }) => [desc(diagnoses.createdAt)],
-        columns: { createdAt: true },
+        columns: { createdAt: true, mode: true, bottleneckStage: true },
       });
 
       const tasks = await conn.query.tasks.findMany({
@@ -182,16 +195,25 @@ export async function loadSnapshots(database?: Database): Promise<ProductSnapsho
           });
           const outcome = await conn.query.outcomes.findFirst({
             where: eq(schema.outcomes.taskId, task.id),
-            columns: { id: true },
+            orderBy: (outcomes, { desc }) => [desc(outcomes.evaluatedAt)],
           });
           return {
             id: task.id,
             title: task.title,
             status: task.status,
+            stage: task.stage,
             channel: task.channel,
             completedAt: task.completedAt,
             hasArtifact: artifact !== undefined,
-            hasOutcome: outcome !== undefined,
+            outcome: outcome
+              ? {
+                  before: outcome.before,
+                  after: outcome.after,
+                  delta: outcome.delta,
+                  windowDays: outcome.windowDays,
+                  evaluatedAt: outcome.evaluatedAt,
+                }
+              : null,
           } satisfies TaskSnapshot;
         }),
       );
@@ -202,6 +224,8 @@ export async function loadSnapshots(database?: Database): Promise<ProductSnapsho
         eventCount: Number(events?.n ?? 0),
         contextEditedByHuman: context ? context.editedByHuman : null,
         latestDiagnosisAt: diagnosis?.createdAt ?? null,
+        latestDiagnosisMode: diagnosis?.mode ?? null,
+        latestBottleneckStage: diagnosis?.bottleneckStage ?? null,
         tasks: withState,
       } satisfies ProductSnapshot;
     }),

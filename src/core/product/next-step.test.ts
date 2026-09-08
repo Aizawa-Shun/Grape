@@ -10,10 +10,11 @@ function task(overrides: Partial<TaskSnapshot> = {}): TaskSnapshot {
     id: "t1",
     title: "OGP画像を用意する",
     status: "proposed",
+    stage: "reach",
     channel: "manual",
     completedAt: null,
     hasArtifact: false,
-    hasOutcome: false,
+    outcome: null,
     ...overrides,
   };
 }
@@ -25,6 +26,8 @@ function snapshot(overrides: Partial<ProductSnapshot> = {}): ProductSnapshot {
     eventCount: 100,
     contextEditedByHuman: true,
     latestDiagnosisAt: daysAgo(1),
+    latestDiagnosisMode: "funnel",
+    latestBottleneckStage: "engage",
     tasks: [],
     ...overrides,
   };
@@ -77,7 +80,11 @@ describe("pickNextStep", () => {
 
   it("does not offer to measure a task that was already measured", () => {
     const step = pickNextStep(
-      [snapshot({ tasks: [task({ status: "done", completedAt: daysAgo(30), hasOutcome: true })] })],
+      [snapshot({ tasks: [task({
+            status: "done",
+            completedAt: daysAgo(30),
+            outcome: { before: 10, after: 14, delta: 4, windowDays: 7, evaluatedAt: daysAgo(20) },
+          })] })],
       NOW,
     );
 

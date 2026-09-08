@@ -2,10 +2,11 @@ import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
 import { STAGE_UI } from "@/core/data/stages";
-import { loadSnapshots, pickNextStep } from "@/core/product/next-step";
+import { buildBriefing } from "@/core/product/briefing";
+import { loadSnapshots } from "@/core/product/next-step";
 import { db } from "@/db/client";
 
-import { NextStepCard } from "./next-step-card";
+import { BriefingView } from "./briefing-view";
 import { RegisterProductForm } from "./register-product-form";
 
 // This list changes every time a product is registered or a diagnosis runs.
@@ -16,14 +17,15 @@ import { RegisterProductForm } from "./register-product-form";
 export const dynamic = "force-dynamic";
 
 /**
- * Not a metrics dashboard. The reader has no marketing background and little
- * time, so the page leads with the single next action — decided in code by
- * next-step.ts — and keeps the list of products underneath as context rather
- * than as the main event.
+ * A briefing, not a dashboard. The reader has no marketing background and
+ * little time, so the page opens with where things stand, says so when the
+ * last round of work actually paid off, and offers exactly one next action —
+ * all decided in code by briefing.ts and next-step.ts. The list of services
+ * stays underneath as context rather than as the main event.
  */
 export default async function DashboardPage() {
   const snapshots = await loadSnapshots();
-  const step = pickNextStep(snapshots);
+  const briefing = buildBriefing(snapshots);
 
   const diagnoses = await Promise.all(
     snapshots.map((snapshot) =>
@@ -43,7 +45,7 @@ export default async function DashboardPage() {
         </p>
       </header>
 
-      <NextStepCard step={step} />
+      <BriefingView briefing={briefing} />
 
       {snapshots.length > 0 && (
         <section className="flex flex-col gap-3">
