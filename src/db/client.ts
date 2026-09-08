@@ -2,6 +2,7 @@ import { createClient, type Client } from "@libsql/client";
 import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
 
 import { env } from "@/env";
+import { applyPragmas } from "./pragmas";
 import * as schema from "./schema";
 
 export type Database = LibSQLDatabase<typeof schema>;
@@ -14,6 +15,7 @@ export type Database = LibSQLDatabase<typeof schema>;
 const globalForDb = globalThis as typeof globalThis & {
   __grapeSqlClient?: Client;
   __grapeDb?: Database;
+  __grapeDbReady?: Promise<void>;
 };
 
 function create(): { client: Client; db: Database } {
@@ -26,9 +28,17 @@ const created = existing
   ? { client: globalForDb.__grapeSqlClient!, db: globalForDb.__grapeDb! }
   : create();
 
+/**
+ * Awaited once by the route wrapper before any handler runs, so no query can
+ * reach the database before the pragmas above are in effect.
+ */
+export const dbReady: Promise<void> =
+  globalForDb.__grapeDbReady ?? applyPragmas(created.client);
+
 if (process.env.NODE_ENV !== "production") {
   globalForDb.__grapeSqlClient = created.client;
   globalForDb.__grapeDb = created.db;
+  globalForDb.__grapeDbReady = dbReady;
 }
 
 export const sqlClient = created.client;

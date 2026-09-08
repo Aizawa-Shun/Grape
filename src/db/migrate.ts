@@ -4,6 +4,8 @@ import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
 
+import { applyPragmas } from "./pragmas";
+
 /**
  * Applies the SQL in ./drizzle to the configured database.
  *
@@ -18,6 +20,9 @@ async function main(): Promise<void> {
   const url = process.env.DATABASE_URL ?? "file:./grape.db";
   const client = createClient({ url });
   try {
+    // Same settings the app runs under, so a migration cannot succeed here
+    // under looser rules than the ones its data will live by.
+    await applyPragmas(client);
     await migrate(drizzle(client), { migrationsFolder: "./drizzle" });
     console.log(`Migrations applied to ${url}`);
   } finally {

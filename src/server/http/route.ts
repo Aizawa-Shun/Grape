@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { toAppError } from "@/core/errors";
+import { dbReady } from "@/db/client";
 
 import { runWithRequestId } from "../context";
 import { describeError, log } from "../log";
@@ -35,6 +36,9 @@ export function route<Ctx>(
       const path = new URL(request.url).pathname;
 
       try {
+        // Cheap after the first call; guarantees no handler queries the
+        // database before its pragmas are applied.
+        await dbReady;
         const response = await handler(request, context);
         log.info("request", {
           route: name,

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { getProvider } from "@/core/llm";
-import { sqlClient } from "@/db/client";
+import { dbReady, sqlClient } from "@/db/client";
+import { describeMigrationStatus, migrationStatus, readJournal } from "@/db/migration-status";
 import { env } from "@/env";
 
 export const runtime = "nodejs";
@@ -16,6 +17,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const wantsLlm = new URL(request.url).searchParams.get("llm") !== "0";
 
+  await dbReady;
   const database = await checkDatabase();
   const llm = wantsLlm
     ? await getProvider().health()
@@ -39,19 +41,30 @@ export async function GET(request: Request) {
   );
 }
 
-async function checkDatabase(): Promise<{ ok: boolean; url: string; detail: string }> {
+/**
+ * Counting tables was not a real check: a database three migrations behind has
+ * plenty of tables and passes, then fails later as a confusing query error.
+ * Comparing what has been applied against what this checkout ships catches it
+ * at the point where the answer is still "run the migration".
+ */
+async function checkDatabase(): Promise<{
+  ok: boolean;
+  url: string;
+  detail: string;
+  foreignKeys?: boolean;
+}> {
   try {
-    const result = await sqlClient.execute(
-      "select count(*) as n from sqlite_master where type = 'table'",
-    );
-    const tables = Number(result.rows[0]?.n ?? 0);
+    const status = await migrationStatus(sqlClient, await readJournal());
+    const fk = await sqlClient.execute("PRAGMA foreign_keys");
+    const foreignKeys = Number(Object.values(fk.rows[0] ?? {})[0] ?? 0) === 1;
+
     return {
-      ok: tables > 0,
+      ok: status.ok && foreignKeys,
       url: env.DATABASE_URL,
-      detail:
-        tables > 0
-          ? `${tables} tables`
-          : "no tables — run `pnpm db:generate && pnpm db:migrate`",
+      detail: foreignKeys
+        ? describeMigrationStatus(status)
+        : "foreign key enforcement is off — unknown products would be accepted by /api/collect",
+      foreignKeys,
     };
   } catch (error) {
     return {

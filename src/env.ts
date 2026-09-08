@@ -12,6 +12,26 @@ import { z } from "zod";
 export const LLM_PROVIDER_NAMES = ["anthropic", "ollama", "openai-compat"] as const;
 export type LLMProviderName = (typeof LLM_PROVIDER_NAMES)[number];
 
+/**
+ * `z.url()` alone is not enough: `new URL("localhost:11434")` succeeds, with
+ * protocol "localhost:" — exactly the typo this is meant to catch.
+ */
+const httpUrl = (fallback: string) =>
+  z
+    .string()
+    .refine(
+      (value) => {
+        try {
+          const { protocol } = new URL(value);
+          return protocol === "http:" || protocol === "https:";
+        } catch {
+          return false;
+        }
+      },
+      { message: "must be an http:// or https:// URL" },
+    )
+    .default(fallback);
+
 const EnvSchema = z.object({
   DATABASE_URL: z.string().default("file:./grape.db"),
 
@@ -21,10 +41,10 @@ const EnvSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_MODEL: z.string().default("claude-opus-5"),
 
-  OLLAMA_BASE_URL: z.string().default("http://localhost:11434"),
+  OLLAMA_BASE_URL: httpUrl("http://localhost:11434"),
   OLLAMA_MODEL: z.string().default("qwen2.5:1.5b-instruct"),
 
-  OPENAI_BASE_URL: z.string().default("https://api.openai.com/v1"),
+  OPENAI_BASE_URL: httpUrl("https://api.openai.com/v1"),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default("gpt-4o-mini"),
 
@@ -36,7 +56,7 @@ const EnvSchema = z.object({
    * tunnel. It changes every time the tunnel restarts, which is why the
    * snippet is generated on demand rather than written down once.
    */
-  INGEST_BASE_URL: z.string().default("http://localhost:3000"),
+  INGEST_BASE_URL: httpUrl("http://localhost:3000"),
 
   /**
    * Below this many sessions in the window there is not enough traffic to talk
@@ -66,13 +86,36 @@ const EnvSchema = z.object({
   X_ACCESS_TOKEN_SECRET: z.string().optional(),
 });
 
+/**
+ * Cross-field rules the per-field schema cannot express.
+ *
+ * Only one of these is fatal. A missing ANTHROPIC_API_KEY deliberately is not:
+ * `ant auth login` is a legitimate way to be authenticated, and env cannot see
+ * it, so refusing to boot would be wrong. A remote openai-compat endpoint with
+ * no key, on the other hand, cannot possibly work.
+ */
+const CheckedEnvSchema = EnvSchema.superRefine((value, ctx) => {
+  if (value.LLM_PROVIDER !== "openai-compat") return;
+  if (value.OPENAI_API_KEY) return;
+
+  const host = new URL(value.OPENAI_BASE_URL).hostname;
+  const isLocal = host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
+  if (isLocal) return;
+
+  ctx.addIssue({
+    code: "custom",
+    path: ["OPENAI_API_KEY"],
+    message: `required when LLM_PROVIDER=openai-compat and OPENAI_BASE_URL points at ${host}`,
+  });
+});
+
 export type Env = z.infer<typeof EnvSchema>;
 
 /**
  * Treat blank env vars as absent. `FOO=` in a .env file otherwise beats the
  * schema default with an empty string.
  */
-function definedEntries(source: NodeJS.ProcessEnv): Record<string, string> {
+function definedEntries(source: Record<string, string | undefined>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(source)) {
     if (typeof value === "string" && value.trim() !== "") out[key] = value;
@@ -80,8 +123,9 @@ function definedEntries(source: NodeJS.ProcessEnv): Record<string, string> {
   return out;
 }
 
-function loadEnv(): Env {
-  const parsed = EnvSchema.safeParse(definedEntries(process.env));
+/** Takes its source as an argument so the rules above are testable without mutating process.env. */
+export function parseEnv(source: Record<string, string | undefined>): Env {
+  const parsed = CheckedEnvSchema.safeParse(definedEntries(source));
   if (!parsed.success) {
     const detail = parsed.error.issues
       .map((issue) => `  ${issue.path.join(".") || "(root)"}: ${issue.message}`)
@@ -91,4 +135,4 @@ function loadEnv(): Env {
   return parsed.data;
 }
 
-export const env: Env = loadEnv();
+export const env: Env = parseEnv(process.env);
