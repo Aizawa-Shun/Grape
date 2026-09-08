@@ -23,9 +23,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="ja"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
-        <main className="flex flex-1 flex-col">{children}</main>
-      </body>
+      {/*
+        No <main> here: the landmark belongs inside each layout, because the
+        app shell renders a <nav> alongside its content and /login has neither.
+      */}
+      <body className="min-h-full">{children}</body>
     </html>
   );
 }

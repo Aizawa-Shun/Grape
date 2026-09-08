@@ -39,7 +39,7 @@ export function FunnelView({ productId, funnel, windowDays }: Props) {
           {WINDOW_CHOICES.map((days) => (
             <Link
               key={days}
-              href={`/products/${productId}?windowDays=${days}`}
+              href={`/products/${productId}/funnel?windowDays=${days}`}
               aria-current={days === windowDays ? "page" : undefined}
               className={cx(
                 "rounded-md px-2.5 py-1 text-xs",
