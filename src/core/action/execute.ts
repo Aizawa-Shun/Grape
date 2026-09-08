@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 
 import { env } from "@/env";
 import { db, schema, type Database } from "@/db/client";
+import { log } from "@/server/log";
 
 import { estimateActionCostUsd } from "./channel";
 import { getChannel } from "./channels";
@@ -73,7 +74,8 @@ export async function approveAndExecute(
   if (dryRun) {
     // The one place dry-run's effect is actually visible: this is what a real
     // send would have posted, with nowhere else it is shown before this point.
-    console.log(`[action:dry-run] channel=${task.channel} task=${taskId}\n${artifact.content}`);
+    // Never truncate `content` — showing it in full is the entire purpose.
+    log.info("action.dry_run", { channel: task.channel, taskId, content: artifact.content });
     return finish(conn, run.id, taskId, { status: "dry_run" });
   }
 

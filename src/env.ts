@@ -57,6 +57,9 @@ const EnvSchema = z.object({
     .optional()
     .transform((v) => v?.trim().toLowerCase() !== "false"),
 
+  // --- Operations ---------------------------------------------------------
+  GRAPE_LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+
   X_CONSUMER_KEY: z.string().optional(),
   X_CONSUMER_SECRET: z.string().optional(),
   X_ACCESS_TOKEN: z.string().optional(),

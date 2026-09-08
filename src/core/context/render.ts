@@ -14,6 +14,8 @@
  * normally; it just cannot rescue client-rendered ones.
  */
 
+import { log } from "@/server/log";
+
 export interface RenderedPage {
   html: string;
   status: number;
@@ -150,5 +152,5 @@ function describe(error: unknown): string {
 function warnOnce(message: string): void {
   if (launchWarningLogged) return;
   launchWarningLogged = true;
-  console.warn(`[crawl] ${message}`);
+  log.warn("crawl.browser_unavailable", { reason: message });
 }
