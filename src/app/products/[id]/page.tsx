@@ -1,11 +1,11 @@
+import { eq, sql } from "drizzle-orm";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { db, schema } from "@/db/client";
-import { eq } from "drizzle-orm";
-
+import { Badge } from "@/components/ui/badge";
 import { estimateActionCostUsd } from "@/core/action/channel";
 import { getFunnel } from "@/core/data/funnel";
+import { db, schema } from "@/db/client";
 import { env } from "@/env";
 
 import { ContextEditor } from "./context-editor";
@@ -21,6 +21,15 @@ function parseWindowDays(raw: string | undefined): number {
   return (WINDOW_CHOICES as readonly number[]).includes(n) ? n : 30;
 }
 
+/**
+ * Two halves, deliberately unequal.
+ *
+ * What to do now — the finding and this week's tasks — and what the numbers
+ * say, are what someone opens this page for. Everything else is setup that is
+ * done once and then only occasionally revisited, so it collapses into a
+ * single line as soon as it is complete instead of competing for attention
+ * forever. Previously all six sections sat at the same weight.
+ */
 export default async function ProductPage({
   params,
   searchParams,
@@ -32,9 +41,7 @@ export default async function ProductPage({
   const { windowDays: windowDaysParam } = await searchParams;
   const windowDays = parseWindowDays(windowDaysParam);
 
-  const product = await db.query.products.findFirst({
-    where: eq(schema.products.id, id),
-  });
+  const product = await db.query.products.findFirst({ where: eq(schema.products.id, id) });
   if (!product) notFound();
 
   const versions = await db.query.productContexts.findMany({
@@ -47,6 +54,12 @@ export default async function ProductPage({
     where: eq(schema.crawlPages.productId, id),
     orderBy: (crawlPages, { desc }) => [desc(crawlPages.fetchedAt)],
   });
+
+  const [events] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(schema.events)
+    .where(eq(schema.events.productId, id));
+  const eventCount = Number(events?.n ?? 0);
 
   const funnel = await getFunnel(id, { windowDays });
 
@@ -78,7 +91,9 @@ export default async function ProductPage({
           where: eq(schema.actionRuns.taskId, task.id),
           orderBy: (actionRuns, { desc }) => [desc(actionRuns.createdAt)],
         })) ?? null;
-      const costEstimateUsd = artifact ? estimateActionCostUsd(task.channel, artifact.content) : null;
+      const costEstimateUsd = artifact
+        ? estimateActionCostUsd(task.channel, artifact.content)
+        : null;
       const outcome =
         (await db.query.outcomes.findFirst({
           where: eq(schema.outcomes.taskId, task.id),
@@ -88,25 +103,34 @@ export default async function ProductPage({
     }),
   );
 
+  // The same three conditions next-step.ts uses, so the page and the
+  // dashboard cannot disagree about whether setup is finished.
+  const setupSteps = [
+    { label: "サービスの説明を確認した", done: latest?.editedByHuman === true },
+    { label: "計測用のコードを貼った", done: eventCount > 0 },
+    { label: "ゴールの操作を決めた", done: product.keyEventName !== null },
+  ];
+  const remaining = setupSteps.filter((step) => !step.done).length;
+
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-6 py-16">
+    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-10 px-4 py-10 sm:px-6 sm:py-16">
       <header className="flex flex-col gap-1">
-        <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
-          ← ダッシュボード
+        <Link href="/" className="text-sm text-text-muted hover:text-text">
+          ← 一覧にもどる
         </Link>
         <h1 className="text-2xl font-semibold tracking-tight">{product.name}</h1>
         <a
           href={product.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-sm text-zinc-500 hover:underline"
+          className="text-sm text-text-muted hover:underline"
         >
           {product.url}
         </a>
       </header>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-zinc-500">今週のボトルネックとタスク</h2>
+        <h2 className="text-sm font-medium text-text-muted">いまの状態とやること</h2>
         <DiagnosisPanel
           productId={id}
           diagnosis={latestDiagnosis}
@@ -116,74 +140,96 @@ export default async function ProductPage({
       </section>
 
       <section className="flex flex-col gap-3">
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-sm font-medium text-zinc-500">Product Context</h2>
-          {latest && <span className="text-xs text-zinc-400">version {latest.version}</span>}
-        </div>
-
-        {latest ? (
-          <ContextEditor
-            productId={id}
-            initial={{ what: latest.what, who: latest.who, why: latest.why, how: latest.how }}
-            gaps={latest.gaps}
-            editedByHuman={latest.editedByHuman}
-          />
-        ) : (
-          <p className="text-sm text-zinc-400">まだContextがありません。</p>
-        )}
-      </section>
-
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-zinc-500">ファネル</h2>
-        <KeyEventForm productId={id} keyEventName={product.keyEventName} />
+        <h2 className="text-sm font-medium text-text-muted">利用者の流れ</h2>
         <FunnelView productId={id} funnel={funnel} windowDays={windowDays} />
       </section>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-zinc-500">トラッキングスニペット</h2>
-        <TrackingSnippet productId={id} ingestBaseUrl={env.INGEST_BASE_URL} />
-      </section>
+      <details open={remaining > 0} className="rounded-md border border-border">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
+          設定
+          {remaining > 0 ? (
+            <Badge tone="attention" className="ml-2">
+              あと{remaining}つ
+            </Badge>
+          ) : (
+            <span className="ml-2 text-xs font-normal text-text-muted">ぜんぶ済んでいます</span>
+          )}
+        </summary>
 
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium text-zinc-500">クロールしたページ ({pages.length})</h2>
-        <ul className="flex flex-col divide-y divide-zinc-200 rounded-md border border-zinc-200 text-sm dark:divide-zinc-800 dark:border-zinc-800">
-          {pages.map((page) => (
-            <li key={page.id} className="flex items-center justify-between gap-2 px-3 py-2">
-              <span className="truncate">{page.url}</span>
-              <span className="flex shrink-0 items-center gap-2 text-xs">
-                {page.renderedWith === "browser" && (
-                  // Worth surfacing, not hiding: anything that reads this page
-                  // without running scripts — search engines, link previews —
-                  // sees nothing.
-                  <span
-                    className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-700 dark:bg-amber-950 dark:text-amber-500"
-                    title="サーバーが返すHTMLは空で、JavaScript実行後にのみ本文が現れます。検索エンジンやリンクプレビューからは読めません。"
-                  >
-                    JS描画
-                  </span>
-                )}
-                <span className={page.status === 200 ? "text-zinc-400" : "text-red-500"}>
-                  {page.status || "unreachable"}
-                </span>
-              </span>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      {versions.length > 1 && (
-        <section className="flex flex-col gap-2">
-          <h2 className="text-sm font-medium text-zinc-500">履歴</h2>
-          <ul className="flex flex-col gap-1 text-sm text-zinc-500">
-            {versions.map((version) => (
-              <li key={version.id}>
-                v{version.version} — {version.editedByHuman ? "人間が修正" : "自動抽出"} —{" "}
-                {version.createdAt.toLocaleString("ja-JP")}
+        <div className="flex flex-col gap-8 border-t border-border px-4 py-5">
+          <ul className="flex flex-col gap-1 text-sm">
+            {setupSteps.map((step) => (
+              <li key={step.label} className={step.done ? "text-text-muted" : ""}>
+                <span aria-hidden="true">{step.done ? "✓" : "・"}</span>{" "}
+                <span className="sr-only">{step.done ? "完了: " : "未完了: "}</span>
+                {step.label}
               </li>
             ))}
           </ul>
-        </section>
-      )}
+
+          <section className="flex flex-col gap-3">
+            <h3 className="text-sm font-medium">ゴールの操作</h3>
+            <KeyEventForm productId={id} keyEventName={product.keyEventName} />
+          </section>
+
+          <section className="flex flex-col gap-3">
+            <h3 className="text-sm font-medium">計測用のコード</h3>
+            <TrackingSnippet productId={id} ingestBaseUrl={env.INGEST_BASE_URL} />
+          </section>
+
+          <section className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h3 className="text-sm font-medium">このサービスについて</h3>
+              {latest && (
+                <span className="text-xs text-text-muted">
+                  {versions.length}回目の内容
+                  {latest.editedByHuman ? "（あなたが修正）" : "（自動で作成）"}
+                </span>
+              )}
+            </div>
+            {latest ? (
+              <ContextEditor
+                productId={id}
+                initial={{ what: latest.what, who: latest.who, why: latest.why, how: latest.how }}
+                gaps={latest.gaps}
+                editedByHuman={latest.editedByHuman}
+              />
+            ) : (
+              <p className="text-sm text-text-muted">まだ内容がありません。</p>
+            )}
+          </section>
+
+          <section className="flex flex-col gap-2">
+            <h3 className="text-sm font-medium">読み取ったページ（{pages.length}）</h3>
+            <ul className="flex flex-col divide-y divide-border rounded-md border border-border text-sm">
+              {pages.map((page) => (
+                <li key={page.id} className="flex flex-col gap-1 px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate">{page.url}</span>
+                    <span
+                      className={
+                        page.status === 200
+                          ? "shrink-0 text-xs text-text-muted"
+                          : "shrink-0 text-xs text-negative"
+                      }
+                    >
+                      {page.status === 200 ? "読めました" : "読めませんでした"}
+                    </span>
+                  </div>
+                  {page.renderedWith === "browser" && (
+                    // Worth stating in full rather than hiding in a tooltip:
+                    // anything that reads this page without running scripts —
+                    // search engines, link previews — sees nothing at all.
+                    <p className="text-xs text-attention">
+                      このページはJavaScriptが動かないと中身が出ません。検索エンジンやSNSのリンクからは空に見えている可能性があります。
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
+      </details>
     </div>
   );
 }
