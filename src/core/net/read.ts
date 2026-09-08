@@ -12,7 +12,14 @@ export interface CappedRead {
   truncated: boolean;
 }
 
-export async function readTextCapped(response: Response, maxBytes: number): Promise<CappedRead> {
+/** Structural, so it accepts an incoming Request as readily as a fetched Response. */
+export interface CappedBody {
+  body: ReadableStream<Uint8Array> | null;
+  headers: Headers;
+  text(): Promise<string>;
+}
+
+export async function readTextCapped(response: CappedBody, maxBytes: number): Promise<CappedRead> {
   const declared = Number(response.headers.get("content-length") ?? "");
   if (Number.isFinite(declared) && declared > maxBytes) {
     await response.body?.cancel().catch(() => {});

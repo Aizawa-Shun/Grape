@@ -93,6 +93,12 @@ const EnvSchema = z.object({
     .optional()
     .transform((v) => v?.trim().toLowerCase() !== "false"),
 
+  /**
+   * Events older than this are deleted. Without a ceiling the ingest endpoint
+   * is an unbounded write path with no authentication in front of it.
+   */
+  GRAPE_EVENT_RETENTION_DAYS: z.coerce.number().int().positive().default(180),
+
   // --- Operations ---------------------------------------------------------
   GRAPE_LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 
