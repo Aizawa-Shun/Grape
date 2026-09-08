@@ -41,6 +41,22 @@ const EnvSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_MODEL: z.string().default("claude-opus-5"),
 
+  /**
+   * Generous, because a 1.5B model on a CPU-only machine legitimately needs a
+   * minute to read a long prompt. The point is not to be strict — it is that
+   * without any limit a stalled request holds a Node handle indefinitely and
+   * the page just spins.
+   */
+  LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+  /** Short on purpose: /api/health must answer even when the model is wedged. */
+  LLM_HEALTH_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
+  /**
+   * How many times to re-ask after unparseable output. One is deliberate:
+   * a model that has already broken the grammar twice is unlikely to fix it on
+   * a third try, and each attempt costs another full prompt evaluation.
+   */
+  LLM_MAX_REPAIRS: z.coerce.number().int().min(0).max(3).default(1),
+
   OLLAMA_BASE_URL: httpUrl("http://localhost:11434"),
   OLLAMA_MODEL: z.string().default("qwen2.5:1.5b-instruct"),
 

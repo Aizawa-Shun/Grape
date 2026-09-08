@@ -2,8 +2,9 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { renderContextSnapshot } from "@/core/context/snapshot";
-import { AppError } from "@/core/errors";
+import { AppError, toAppError } from "@/core/errors";
 import { getFunnel, type FunnelResult } from "@/core/data/funnel";
+import { STAGE_UI } from "@/core/data/stages";
 import { getProvider, type LLMProvider } from "@/core/llm";
 import { db, schema, type Database } from "@/db/client";
 import type { FunnelStage } from "@/db/schema";
@@ -174,13 +175,34 @@ export async function diagnoseProduct(productId: string, options: DiagnoseOption
     evidence = { funnel: funnelEvidenceSummary(funnel), pastOutcomes };
   }
 
-  const { value, model } = await provider.completeStructured({
-    kind: "diagnose",
-    schemaName: "diagnosis_summary",
-    schema: DiagnosisNarrativeSchema,
-    system: buildSystemPrompt(product, context),
-    user: userPrompt,
-  });
+  /*
+   * Everything above this line was decided without a model: the funnel, the
+   * bottleneck, the audit findings. Only the explanation needs one.
+   *
+   * So when the model fails, no diagnoses row is written. A template summary
+   * would be arithmetic wearing a reasoning costume — and worse, it would be
+   * persisted, read back by renderPastOutcomes, and fed into the next
+   * diagnosis, so Grape would end up learning from sentences no intelligence
+   * produced. The hint carries the part that *is* known, so the UI can point
+   * at the numbers instead of showing nothing.
+   */
+  let value: z.infer<typeof DiagnosisNarrativeSchema>;
+  let model: string;
+  try {
+    ({ value, model } = await provider.completeStructured({
+      kind: "diagnose",
+      schemaName: "diagnosis_summary",
+      schema: DiagnosisNarrativeSchema,
+      system: buildSystemPrompt(product, context),
+      user: userPrompt,
+    }));
+  } catch (error) {
+    const appError = toAppError(error);
+    throw new AppError(appError.code, appError.message, {
+      cause: error,
+      hint: `詰まっている段階は「${STAGE_UI[bottleneckStage].label}」と計算できています`,
+    });
+  }
 
   const [row] = await conn
     .insert(schema.diagnoses)

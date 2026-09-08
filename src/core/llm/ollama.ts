@@ -1,4 +1,8 @@
-import { parseStructured, stripThinkBlocks, toProviderJsonSchema } from "./json-schema";
+import { env } from "@/env";
+
+import { fetchModel } from "./http";
+import { stripThinkBlocks, toProviderJsonSchema } from "./json-schema";
+import { completeStructuredWithRepair } from "./structured";
 import {
   EMPTY_USAGE,
   LLMError,
@@ -35,16 +39,25 @@ export class OllamaProvider implements LLMProvider {
   readonly name = "ollama";
   readonly model: string;
   readonly #baseUrl: string;
+  readonly #timeoutMs: number;
+  readonly #maxAttempts: number;
 
-  constructor(options: { model: string; baseUrl: string }) {
+  constructor(options: {
+    model: string;
+    baseUrl: string;
+    timeoutMs?: number;
+    maxRepairs?: number;
+  }) {
     this.model = options.model;
     this.#baseUrl = options.baseUrl.replace(/\/+$/, "");
+    this.#timeoutMs = options.timeoutMs ?? env.LLM_TIMEOUT_MS;
+    this.#maxAttempts = (options.maxRepairs ?? env.LLM_MAX_REPAIRS) + 1;
   }
 
   async #chat(req: CompletionRequest, format?: unknown): Promise<{ text: string; usage: Usage; model: string }> {
-    let response: Response;
-    try {
-      response = await fetch(`${this.#baseUrl}/api/chat`, {
+    const response = await fetchModel(
+      `${this.#baseUrl}/api/chat`,
+      {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -63,10 +76,9 @@ export class OllamaProvider implements LLMProvider {
             { role: "user", content: req.user },
           ],
         }),
-      });
-    } catch (error) {
-      throw new LLMError(`Could not reach Ollama at ${this.#baseUrl}`, this.name, "unreachable", error);
-    }
+      },
+      { timeoutMs: this.#timeoutMs, provider: this.name },
+    );
 
     if (!response.ok) {
       throw new LLMError(
@@ -94,18 +106,22 @@ export class OllamaProvider implements LLMProvider {
   }
 
   async completeStructured<T>(req: StructuredCompletionRequest<T>): Promise<CompletionResult<T>> {
-    // Ollama compiles the JSON Schema into a decoding grammar.
-    const { text, usage, model } = await this.#chat(req, toProviderJsonSchema(req.schema));
-    return {
-      value: parseStructured(text, req.schema, this.name, req.schemaName),
-      usage,
-      model,
-    };
+    // Ollama compiles the JSON Schema into a decoding grammar — a strong hint,
+    // but small models still drift, which is what the repair attempt is for.
+    return completeStructuredWithRepair((r, format) => this.#chat(r, format), req, {
+      provider: this.name,
+      maxAttempts: this.#maxAttempts,
+      format: toProviderJsonSchema(req.schema),
+    });
   }
 
   async health(): Promise<ProviderHealth> {
     try {
-      const response = await fetch(`${this.#baseUrl}/api/tags`);
+      const response = await fetchModel(
+        `${this.#baseUrl}/api/tags`,
+        {},
+        { timeoutMs: env.LLM_HEALTH_TIMEOUT_MS, provider: this.name },
+      );
       if (!response.ok) {
         return {
           ok: false,

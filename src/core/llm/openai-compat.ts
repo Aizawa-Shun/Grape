@@ -1,4 +1,8 @@
-import { parseStructured, stripThinkBlocks, toProviderJsonSchema } from "./json-schema";
+import { env } from "@/env";
+
+import { fetchModel } from "./http";
+import { stripThinkBlocks, toProviderJsonSchema } from "./json-schema";
+import { completeStructuredWithRepair } from "./structured";
 import {
   EMPTY_USAGE,
   LLMError,
@@ -31,20 +35,30 @@ export class OpenAICompatProvider implements LLMProvider {
   readonly model: string;
   readonly #baseUrl: string;
   readonly #apiKey?: string;
+  readonly #timeoutMs: number;
+  readonly #maxAttempts: number;
 
-  constructor(options: { model: string; baseUrl: string; apiKey?: string }) {
+  constructor(options: {
+    model: string;
+    baseUrl: string;
+    apiKey?: string;
+    timeoutMs?: number;
+    maxRepairs?: number;
+  }) {
     this.model = options.model;
     this.#baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.#apiKey = options.apiKey;
+    this.#timeoutMs = options.timeoutMs ?? env.LLM_TIMEOUT_MS;
+    this.#maxAttempts = (options.maxRepairs ?? env.LLM_MAX_REPAIRS) + 1;
   }
 
   async #chat(
     req: CompletionRequest,
     responseFormat?: unknown,
   ): Promise<{ text: string; usage: Usage; model: string }> {
-    let response: Response;
-    try {
-      response = await fetch(`${this.#baseUrl}/chat/completions`, {
+    const response = await fetchModel(
+      `${this.#baseUrl}/chat/completions`,
+      {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -59,10 +73,9 @@ export class OpenAICompatProvider implements LLMProvider {
             { role: "user", content: req.user },
           ],
         }),
-      });
-    } catch (error) {
-      throw new LLMError(`Could not reach ${this.#baseUrl}`, this.name, "unreachable", error);
-    }
+      },
+      { timeoutMs: this.#timeoutMs, provider: this.name },
+    );
 
     if (!response.ok) {
       throw new LLMError(
@@ -90,26 +103,27 @@ export class OpenAICompatProvider implements LLMProvider {
   }
 
   async completeStructured<T>(req: StructuredCompletionRequest<T>): Promise<CompletionResult<T>> {
-    const { text, usage, model } = await this.#chat(req, {
-      type: "json_schema",
-      json_schema: {
-        name: req.schemaName,
-        strict: true,
-        schema: toProviderJsonSchema(req.schema),
+    return completeStructuredWithRepair((r, format) => this.#chat(r, format), req, {
+      provider: this.name,
+      maxAttempts: this.#maxAttempts,
+      format: {
+        type: "json_schema",
+        json_schema: {
+          name: req.schemaName,
+          strict: true,
+          schema: toProviderJsonSchema(req.schema),
+        },
       },
     });
-    return {
-      value: parseStructured(text, req.schema, this.name, req.schemaName),
-      usage,
-      model,
-    };
   }
 
   async health(): Promise<ProviderHealth> {
     try {
-      const response = await fetch(`${this.#baseUrl}/models`, {
-        headers: this.#apiKey ? { authorization: `Bearer ${this.#apiKey}` } : {},
-      });
+      const response = await fetchModel(
+        `${this.#baseUrl}/models`,
+        { headers: this.#apiKey ? { authorization: `Bearer ${this.#apiKey}` } : {} },
+        { timeoutMs: env.LLM_HEALTH_TIMEOUT_MS, provider: this.name },
+      );
       return {
         ok: response.ok,
         provider: this.name,

@@ -53,23 +53,19 @@ function extractJson(raw: string): string {
   return lastBrace > firstBrace ? trimmed.slice(firstBrace, lastBrace + 1) : trimmed;
 }
 
+export type ParseOutcome<T> = { ok: true; value: T } | { ok: false; reason: string };
+
 /**
- * The safety net that makes every provider behave identically. Constrained
- * decoding is a hint, not a guarantee — the Zod schema is the actual contract,
- * so a provider that drifts fails loudly here instead of quietly handing
- * malformed data to the Decision Engine.
+ * The non-throwing core, so the repair loop in structured.ts can decide
+ * whether a failure is worth another attempt instead of having that decision
+ * made for it by an exception.
  */
-export function parseStructured<T>(raw: string, schema: ZodType<T>, provider: string, schemaName: string): T {
+export function tryParseStructured<T>(raw: string, schema: ZodType<T>): ParseOutcome<T> {
   let json: unknown;
   try {
     json = JSON.parse(extractJson(raw));
-  } catch (error) {
-    throw new LLMError(
-      `Model output for "${schemaName}" was not valid JSON: ${raw.slice(0, 300)}`,
-      provider,
-      "bad_output",
-      error,
-    );
+  } catch {
+    return { ok: false, reason: "JSONとして解釈できませんでした" };
   }
 
   const parsed = schema.safeParse(json);
@@ -77,13 +73,26 @@ export function parseStructured<T>(raw: string, schema: ZodType<T>, provider: st
     const detail = parsed.error.issues
       .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
       .join("; ");
-    throw new LLMError(
-      `Model output did not satisfy schema "${schemaName}": ${detail}`,
-      provider,
-      "bad_output",
-    );
+    return { ok: false, reason: `項目が要求と合っていません — ${detail}` };
   }
-  return parsed.data;
+  return { ok: true, value: parsed.data };
+}
+
+/**
+ * The safety net that makes every provider behave identically. Constrained
+ * decoding is a hint, not a guarantee — the Zod schema is the actual contract,
+ * so a provider that drifts fails loudly here instead of quietly handing
+ * malformed data to the Decision Engine.
+ */
+export function parseStructured<T>(raw: string, schema: ZodType<T>, provider: string, schemaName: string): T {
+  const outcome = tryParseStructured(raw, schema);
+  if (outcome.ok) return outcome.value;
+
+  throw new LLMError(
+    `Model output for "${schemaName}" was unusable (${outcome.reason}): ${raw.slice(0, 300)}`,
+    provider,
+    "bad_output",
+  );
 }
 
 /** Reasoning models such as qwen3 prefix free-text answers with a think block. */

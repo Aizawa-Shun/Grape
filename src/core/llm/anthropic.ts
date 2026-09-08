@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 
+import { env } from "@/env";
+
 import {
   EFFORT_BY_KIND,
   LLMError,
@@ -44,11 +46,18 @@ export class AnthropicProvider implements LLMProvider {
   readonly model: string;
   readonly #client: Anthropic;
 
-  constructor(options: { model: string; apiKey?: string }) {
+  constructor(options: { model: string; apiKey?: string; timeoutMs?: number }) {
     this.model = options.model;
+    // Stated rather than left to the SDK's own defaults: with the other two
+    // adapters now bounded by LLM_TIMEOUT_MS, leaving this one to differ would
+    // mean retry and timeout behaviour varying by provider — the exact thing
+    // the provider interface exists to hide.
+    const shared = { timeout: options.timeoutMs ?? env.LLM_TIMEOUT_MS, maxRetries: 1 };
     // A bare constructor resolves ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or an
     // `ant auth login` profile on its own; only override when a key is given.
-    this.#client = options.apiKey ? new Anthropic({ apiKey: options.apiKey }) : new Anthropic();
+    this.#client = new Anthropic(
+      options.apiKey ? { ...shared, apiKey: options.apiKey } : shared,
+    );
   }
 
   /**
@@ -152,12 +161,17 @@ export class AnthropicProvider implements LLMProvider {
 
   async health(): Promise<ProviderHealth> {
     try {
-      const response = await this.#client.messages.create({
-        model: this.model,
-        max_tokens: 16,
-        output_config: { effort: "low" },
-        messages: [{ role: "user", content: "Reply with the single word: ok" }],
-      });
+      const response = await this.#client.messages.create(
+        {
+          model: this.model,
+          max_tokens: 16,
+          output_config: { effort: "low" },
+          messages: [{ role: "user", content: "Reply with the single word: ok" }],
+        },
+        // A health check that can block for the full request timeout is not a
+        // health check.
+        { timeout: env.LLM_HEALTH_TIMEOUT_MS, maxRetries: 0 },
+      );
       const text = response.content
         .filter((block) => block.type === "text")
         .map((block) => block.text)
