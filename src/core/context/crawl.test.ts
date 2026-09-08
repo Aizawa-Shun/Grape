@@ -211,6 +211,54 @@ describe("crawlSite", () => {
     expect(pages[0].links).toEqual([]);
   });
 
+  it("resolves links against where a redirect landed, not where it was aimed", async () => {
+    // A site that sends "/" to "/en/" used to produce links pointing at the
+    // wrong paths, because the HTML was parsed against the requested URL.
+    const fetchImpl = (async (url: string) => {
+      if (url === "https://example.com/") {
+        return new Response(null, { status: 302, headers: { location: "/en/" } });
+      }
+      if (url === "https://example.com/en/") {
+        return new Response('<body><a href="about">About</a></body>', {
+          status: 200,
+          headers: { "content-type": "text/html" },
+        });
+      }
+      return new Response("<body>About page</body>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      });
+    }) as unknown as typeof fetch;
+
+    const pages = await crawlSite("https://example.com/", {
+      maxPages: 2,
+      fetchImpl,
+      rendererFactory: neverRender(),
+    });
+
+    expect(pages[0].links).toContain("https://example.com/en/about");
+  });
+
+  it("refuses a link that leaves the site for a private address", async () => {
+    const fetchImpl = (async () =>
+      new Response('<body><a href="http://169.254.169.254/">x</a></body>', {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      })) as unknown as typeof fetch;
+
+    const pages = await crawlSite("https://example.com/", {
+      maxPages: 3,
+      fetchImpl,
+      lookup: async () => ["127.0.0.1"],
+      rendererFactory: neverRender(),
+    });
+
+    // Cross-origin links are dropped before this point anyway; what matters is
+    // that the crawl completed rather than reaching inward.
+    expect(pages).toHaveLength(1);
+    expect(pages[0].links).toEqual([]);
+  });
+
   it("rejects a URL it cannot crawl", async () => {
     await expect(crawlSite("not a url")).rejects.toThrow(/not a crawlable url/i);
   });

@@ -1,6 +1,15 @@
 import * as cheerio from "cheerio";
 
 import { AppError } from "@/core/errors";
+import {
+  isPrivateHost,
+  policyForEntry,
+  safeFetch,
+  type Lookup,
+  type TargetPolicy,
+} from "@/core/net/guard";
+import { readTextCapped } from "@/core/net/read";
+import { log } from "@/server/log";
 
 import { createPageRenderer, type PageRenderer } from "./render";
 import { findManifestUrl, jsonLdToMeta, manifestToMeta } from "./structured";
@@ -61,12 +70,21 @@ export interface CrawlOptions {
   renderClientSide?: boolean;
   /** Injectable for tests, so a fake renderer can stand in for Chromium. */
   rendererFactory?: () => Promise<PageRenderer>;
+  /** Injectable for tests, so the private-address guard needs no real DNS. */
+  lookup?: Lookup;
 }
 
 const DEFAULTS = {
   maxPages: 5,
   timeoutMs: 15_000,
   maxTextChars: 20_000,
+  /**
+   * The timeout bounds how long a fetch may take, not how much it may send.
+   * Without a ceiling a fast server can push far more into memory than this
+   * machine has, well inside 15 seconds.
+   */
+  maxHtmlBytes: 2 * 1024 * 1024,
+  maxManifestBytes: 256 * 1024,
 } as const;
 
 const USER_AGENT = "GrapeBot/0.1 (+https://github.com/; indie product growth assistant)";
@@ -164,6 +182,7 @@ interface FetchSettings {
   timeoutMs: number;
   maxTextChars: number;
   fetchImpl: typeof fetch;
+  policy: TargetPolicy;
 }
 
 /**
@@ -177,31 +196,32 @@ interface FetchedPage {
 }
 
 async function fetchPage(url: string, options: FetchSettings): Promise<FetchedPage> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs);
-
   try {
-    const response = await options.fetchImpl(url, {
-      redirect: "follow",
-      signal: controller.signal,
-      headers: { "user-agent": USER_AGENT, accept: "text/html,application/xhtml+xml" },
-    });
+    const { response, finalUrl } = await safeFetch(
+      url,
+      { headers: { "user-agent": USER_AGENT, accept: "text/html,application/xhtml+xml" } },
+      { policy: options.policy, timeoutMs: options.timeoutMs, fetchImpl: options.fetchImpl },
+    );
 
     const contentType = response.headers.get("content-type") ?? "";
     if (!response.ok || !contentType.includes("html")) {
       return { page: unreadable(url, response.status), isHtml: false };
     }
 
-    const html = await response.text();
-    const page = await toCrawledPage(parseHtml(html, url, options.maxTextChars), response.status, "static", options);
+    const { text: html } = await readTextCapped(response, DEFAULTS.maxHtmlBytes);
+    // Parsed against finalUrl, not url: after a redirect the relative links on
+    // the page belong to where it ended up, not where it was asked for.
+    const parsed = parseHtml(html, finalUrl, options.maxTextChars);
+    // Recorded under where it actually ended up, so a redirect target cannot
+    // later be queued again as if it were a page we had not read.
+    const page = await toCrawledPage(parsed, response.status, "static", options);
     return { page, isHtml: true };
   } catch (error) {
     // A page that times out or refuses connection is a data point, not a crash:
     // the crawl continues and the diagnosis sees an unreachable page.
-    const status = error instanceof Error && error.name === "AbortError" ? 408 : 0;
+    const name = error instanceof Error ? error.name : "";
+    const status = name === "TimeoutError" || name === "AbortError" ? 408 : 0;
     return { page: unreadable(url, status), isHtml: false };
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -221,25 +241,20 @@ async function toCrawledPage(
 }
 
 async function fetchManifest(url: string, options: FetchSettings): Promise<Record<string, string>> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs);
-
   try {
-    const response = await options.fetchImpl(url, {
-      redirect: "follow",
-      signal: controller.signal,
-      headers: { "user-agent": USER_AGENT, accept: "application/manifest+json,application/json" },
-    });
+    const { response } = await safeFetch(
+      url,
+      { headers: { "user-agent": USER_AGENT, accept: "application/manifest+json,application/json" } },
+      { policy: options.policy, timeoutMs: options.timeoutMs, fetchImpl: options.fetchImpl },
+    );
     if (!response.ok) return {};
 
     // A single-page app answers every unknown path with its HTML shell, so a
     // 200 here proves nothing — only parseable JSON does.
-    const text = await response.text();
+    const { text } = await readTextCapped(response, DEFAULTS.maxManifestBytes);
     return manifestToMeta(JSON.parse(text));
   } catch {
     return {};
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -250,16 +265,26 @@ async function fetchManifest(url: string, options: FetchSettings): Promise<Recor
  * this page count.
  */
 export async function crawlSite(startUrl: string, options: CrawlOptions = {}): Promise<CrawledPage[]> {
-  const settings: FetchSettings = {
-    timeoutMs: options.timeoutMs ?? DEFAULTS.timeoutMs,
-    maxTextChars: options.maxTextChars ?? DEFAULTS.maxTextChars,
-    fetchImpl: options.fetchImpl ?? fetch,
-  };
   const maxPages = options.maxPages ?? DEFAULTS.maxPages;
   const renderClientSide = options.renderClientSide ?? true;
 
   const entry = normalizeUrl(startUrl);
   if (!entry) throw new AppError("INVALID_INPUT", `Not a crawlable URL: ${startUrl}`);
+
+  const policy = policyForEntry(entry, options.lookup);
+  if (isPrivateHost(policy.entryHost)) {
+    // Allowed — someone pointing Grape at their own dev server is a real use
+    // case — but worth a line in the log, because from here on this crawl is
+    // touching the machine it runs on.
+    log.warn("crawl.private_entry", { host: policy.entryHost });
+  }
+
+  const settings: FetchSettings = {
+    timeoutMs: options.timeoutMs ?? DEFAULTS.timeoutMs,
+    maxTextChars: options.maxTextChars ?? DEFAULTS.maxTextChars,
+    fetchImpl: options.fetchImpl ?? fetch,
+    policy,
+  };
 
   const renderer = lazyRenderer(options.rendererFactory ?? createPageRenderer);
 
@@ -296,6 +321,7 @@ export async function crawlSite(startUrl: string, options: CrawlOptions = {}): P
   try {
     const seen = new Set<string>([entry]);
     const pages: CrawledPage[] = [await readPage(entry)];
+    seen.add(pages[0].url);
 
     const queue = pages[0].links
       .filter((link) => !seen.has(link))
@@ -305,7 +331,9 @@ export async function crawlSite(startUrl: string, options: CrawlOptions = {}): P
       if (pages.length >= maxPages) break;
       if (seen.has(link)) continue;
       seen.add(link);
-      pages.push(await readPage(link));
+      const page = await readPage(link);
+      seen.add(page.url);
+      pages.push(page);
     }
 
     return pages;
