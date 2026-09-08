@@ -26,26 +26,39 @@ function funnel(overrides: Partial<FunnelResult> = {}): FunnelResult {
   };
 }
 
-/**
- * Asserts on what the view communicates, not on how it is marked up, so these
- * survive the redesign rather than having to be rewritten alongside it.
- */
 describe("FunnelView", () => {
-  it("shows every stage's session count", () => {
+  it("names the stages in plain Japanese rather than as funnel jargon", () => {
     render(<FunnelView productId="p1" funnel={funnel()} windowDays={30} />);
 
-    for (const count of ["200", "60", "40", "10"]) {
-      expect(screen.getAllByText(count).length).toBeGreaterThan(0);
+    expect(screen.getByText("中身を見てもらう")).toBeInTheDocument();
+    expect(screen.queryByText("Engage")).not.toBeInTheDocument();
+    expect(screen.queryByText(/ボトルネック/)).not.toBeInTheDocument();
+  });
+
+  it("shows every stage's count", () => {
+    render(<FunnelView productId="p1" funnel={funnel()} windowDays={30} />);
+
+    for (const count of ["200 人", "60 人", "40 人", "10 人"]) {
+      expect(screen.getByText(count)).toBeInTheDocument();
     }
   });
 
-  it("singles out the stage the arithmetic blamed", () => {
+  it("says how many people were lost at each step, not just the rate", () => {
     render(<FunnelView productId="p1" funnel={funnel()} windowDays={30} />);
 
-    expect(screen.getByText("ボトルネック")).toBeInTheDocument();
+    // 200 -> 60 is the drop the diagnosis is about; it was computed all along
+    // and never shown.
+    expect(screen.getByText("ここで 140 人が離れています")).toBeInTheDocument();
+    expect(screen.getByText("ここで 20 人が離れています")).toBeInTheDocument();
   });
 
-  it("says the numbers cannot be trusted yet instead of showing rates on a cold start", () => {
+  it("marks the stage the arithmetic blamed", () => {
+    render(<FunnelView productId="p1" funnel={funnel()} windowDays={30} />);
+
+    expect(screen.getByText("いま一番の問題")).toBeInTheDocument();
+  });
+
+  it("refuses to draw rates it cannot stand behind on a cold start", () => {
     render(
       <FunnelView
         productId="p1"
@@ -54,7 +67,43 @@ describe("FunnelView", () => {
       />,
     );
 
-    expect(screen.getByText(/まずは配信経路/)).toBeInTheDocument();
-    expect(screen.queryByText("ボトルネック")).not.toBeInTheDocument();
+    expect(screen.getByText(/まだ判断できる人数が来ていません/)).toBeInTheDocument();
+    expect(screen.queryByText("いま一番の問題")).not.toBeInTheDocument();
+  });
+
+  it("explains the two stages it cannot count instead of showing them as zero", () => {
+    render(
+      <FunnelView
+        productId="p1"
+        funnel={funnel({ hasKeyEvent: false, keyEventName: null, bottleneck: null })}
+        windowDays={30}
+      />,
+    );
+
+    expect(screen.getByText(/ゴールの操作を決めるまで数えられません/)).toBeInTheDocument();
+    expect(screen.queryByText("40 人")).not.toBeInTheDocument();
+  });
+
+  it("does not divide by zero when nothing has happened", () => {
+    render(
+      <FunnelView
+        productId="p1"
+        funnel={funnel({
+          totalSessions: 0,
+          isColdStart: false,
+          bottleneck: null,
+          reachBySource: [],
+          stages: [
+            { stage: "visit", sessions: 0, comparedTo: null, rateFromPrevious: null },
+            { stage: "engage", sessions: 0, comparedTo: 0, rateFromPrevious: null },
+            { stage: "activate", sessions: 0, comparedTo: 0, rateFromPrevious: null },
+            { stage: "retain", sessions: 0, comparedTo: 0, rateFromPrevious: null },
+          ],
+        })}
+        windowDays={30}
+      />,
+    );
+
+    expect(screen.getAllByText("0 人")).toHaveLength(4);
   });
 });
