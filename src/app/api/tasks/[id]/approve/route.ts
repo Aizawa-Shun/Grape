@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { approveAndExecute } from "@/core/action/execute";
+import { route } from "@/server/http/route";
 
 export const runtime = "nodejs";
 
@@ -18,21 +19,12 @@ const ApproveInputSchema = z.object({
  * dry-run flag *is* that step, set deliberately in .env rather than clicked
  * through in a dialog that trains people to click it without reading it.
  */
-export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const body = await request.json().catch(() => null);
-  const parsed = ApproveInputSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Invalid input" }, { status: 400 });
-  }
-
-  try {
-    const run = await approveAndExecute(id, parsed.data.artifactId);
+export const POST = route(
+  "task.approve",
+  async (request: Request, { params }: { params: Promise<{ id: string }> }) => {
+    const { id } = await params;
+    const input = ApproveInputSchema.parse(await request.json().catch(() => null));
+    const run = await approveAndExecute(id, input.artifactId);
     return NextResponse.json({ run }, { status: 201 });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : String(error) },
-      { status: 502 },
-    );
-  }
-}
+  },
+);

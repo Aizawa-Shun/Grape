@@ -1,6 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 
 import { getFunnelForRange } from "@/core/data/funnel";
+import { AppError } from "@/core/errors";
 import { db, schema, type Database } from "@/db/client";
 import type { FunnelStage } from "@/db/schema";
 import type { FunnelResult } from "@/core/data/funnel";
@@ -41,9 +42,9 @@ export async function evaluateOutcome(taskId: string, options: EvaluateOutcomeOp
   const now = options.now ?? new Date();
 
   const task = await conn.query.tasks.findFirst({ where: eq(schema.tasks.id, taskId) });
-  if (!task) throw new Error(`Unknown task: ${taskId}`);
+  if (!task) throw new AppError("NOT_FOUND", `Unknown task: ${taskId}`);
   if (task.status !== "done" || !task.completedAt) {
-    throw new Error(`Task ${taskId} is not done yet — nothing to evaluate`);
+    throw new AppError("CONFLICT", `Task ${taskId} is not done yet — nothing to evaluate`);
   }
 
   const windowMs = windowDays * 24 * 60 * 60 * 1000;
@@ -51,8 +52,10 @@ export async function evaluateOutcome(taskId: string, options: EvaluateOutcomeOp
 
   if (now < afterWindowEnd) {
     const daysLeft = Math.ceil((afterWindowEnd.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
-    throw new Error(
+    throw new AppError(
+      "TOO_EARLY",
       `Too early to evaluate task ${taskId} — needs ${daysLeft} more day(s) of data after completion`,
+      { hint: `あと${daysLeft}日` },
     );
   }
 

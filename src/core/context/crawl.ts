@@ -1,5 +1,7 @@
 import * as cheerio from "cheerio";
 
+import { AppError } from "@/core/errors";
+
 import { createPageRenderer, type PageRenderer } from "./render";
 import { findManifestUrl, jsonLdToMeta, manifestToMeta } from "./structured";
 
@@ -257,7 +259,7 @@ export async function crawlSite(startUrl: string, options: CrawlOptions = {}): P
   const renderClientSide = options.renderClientSide ?? true;
 
   const entry = normalizeUrl(startUrl);
-  if (!entry) throw new Error(`Not a crawlable URL: ${startUrl}`);
+  if (!entry) throw new AppError("INVALID_INPUT", `Not a crawlable URL: ${startUrl}`);
 
   const renderer = lazyRenderer(options.rendererFactory ?? createPageRenderer);
 

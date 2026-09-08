@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 
+import { AppError } from "@/core/errors";
 import { env } from "@/env";
 import { db, schema, type Database } from "@/db/client";
 import { log } from "@/server/log";
@@ -38,15 +39,15 @@ export async function approveAndExecute(
   const conn = options.database ?? db;
 
   const task = await conn.query.tasks.findFirst({ where: eq(schema.tasks.id, taskId) });
-  if (!task) throw new Error(`Unknown task: ${taskId}`);
+  if (!task) throw new AppError("NOT_FOUND", `Unknown task: ${taskId}`);
   // Guards against a double click re-sending an already-sent post — on the x
   // channel that would be a second real, billed, public post, not a no-op.
-  if (task.status === "done") throw new Error(`Task ${taskId} is already done`);
-  if (task.status === "skipped") throw new Error(`Task ${taskId} was skipped`);
+  if (task.status === "done") throw new AppError("CONFLICT", `Task ${taskId} is already done`);
+  if (task.status === "skipped") throw new AppError("CONFLICT", `Task ${taskId} was skipped`);
 
   const artifact = await conn.query.artifacts.findFirst({ where: eq(schema.artifacts.id, artifactId) });
   if (!artifact || artifact.taskId !== taskId) {
-    throw new Error(`Artifact ${artifactId} does not belong to task ${taskId}`);
+    throw new AppError("INVALID_INPUT", `Artifact ${artifactId} does not belong to task ${taskId}`);
   }
 
   // Deliberately not `getChannel(task.channel)` here — that requires real
@@ -125,7 +126,7 @@ export async function skipTask(taskId: string, options: ExecuteOptions = {}): Pr
     .set({ status: "skipped" })
     .where(eq(schema.tasks.id, taskId))
     .returning();
-  if (!row) throw new Error(`Unknown task: ${taskId}`);
+  if (!row) throw new AppError("NOT_FOUND", `Unknown task: ${taskId}`);
   return row;
 }
 

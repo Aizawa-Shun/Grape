@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { AppError } from "@/core/errors";
 import type { LLMProvider } from "@/core/llm";
 
 import type { CrawledPage } from "./crawl";
@@ -124,7 +125,13 @@ export function buildExtractionInput(pages: CrawledPage[]): string {
 
   if (pages.length === 0 || nothingReachable(pages)) {
     const detail = pages.map((page) => `- ${page.url} (status ${page.status})`).join("\n");
-    throw new Error(`No pages could be reached:\n${detail}`);
+    // Reached the site but found nothing readable is a different problem from
+    // not reaching it at all, and the advice for each differs.
+    const anyResponded = pages.some((page) => page.status === 200);
+    throw new AppError(
+      anyResponded ? "CRAWL_EMPTY" : "CRAWL_UNREACHABLE",
+      `No pages could be reached:\n${detail}`,
+    );
   }
 
   const sections = reachable.map((page) => {

@@ -37,10 +37,14 @@ export function estimateActionCostUsd(channel: Channel, content: string): number
 }
 
 /** Raised when a channel answers but the send did not go through. */
+/** Missing credentials, the destination refusing the content, or not reaching it at all. */
+export type ChannelFailure = "auth" | "rejected" | "network";
+
 export class ChannelError extends Error {
   constructor(
     message: string,
     readonly channel: Channel,
+    readonly failure: ChannelFailure,
     readonly cause?: unknown,
   ) {
     super(message);

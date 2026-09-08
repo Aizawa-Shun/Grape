@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { renderContextSnapshot } from "@/core/context/snapshot";
+import { AppError } from "@/core/errors";
 import { getProvider, type LLMProvider } from "@/core/llm";
 import { db, schema, type Database } from "@/db/client";
 import type { ArtifactKind, Channel } from "@/db/schema";
@@ -90,10 +91,10 @@ export async function generateArtifact(taskId: string, options: GenerateOptions 
   const provider = options.provider ?? getProvider();
 
   const task = await conn.query.tasks.findFirst({ where: eq(schema.tasks.id, taskId) });
-  if (!task) throw new Error(`Unknown task: ${taskId}`);
+  if (!task) throw new AppError("NOT_FOUND", `Unknown task: ${taskId}`);
 
   const product = await conn.query.products.findFirst({ where: eq(schema.products.id, task.productId) });
-  if (!product) throw new Error(`Unknown product: ${task.productId}`);
+  if (!product) throw new AppError("NOT_FOUND", `Unknown product: ${task.productId}`);
 
   // Generate against the same Context version the task's diagnosis reasoned
   // over (falling back to latest if the task predates any diagnosis, or the
@@ -114,7 +115,7 @@ export async function generateArtifact(taskId: string, options: GenerateOptions 
         orderBy: (contexts, { desc }) => [desc(contexts.version)],
       });
 
-  if (!context) throw new Error(`Product ${task.productId} has no Product Context yet`);
+  if (!context) throw new AppError("CONFLICT", `Product ${task.productId} has no Product Context yet`);
 
   const kind = CHANNEL_ARTIFACT_KIND[task.channel];
 

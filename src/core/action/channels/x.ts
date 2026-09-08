@@ -119,6 +119,7 @@ export function createXChannel(credentials: XCredentials): ActionChannel {
         throw new ChannelError(
           `Post is ${content.length} characters, over X's ${X_POST_MAX_CHARS} limit`,
           "x",
+          "rejected",
         );
       }
 
@@ -136,7 +137,11 @@ export function createXChannel(credentials: XCredentials): ActionChannel {
       if (!response.ok || !body?.data) {
         const message =
           body?.errors?.[0]?.message ?? body?.detail ?? body?.title ?? `HTTP ${response.status}`;
-        throw new ChannelError(`X API rejected the post: ${message}`, "x", body);
+        // 403 here is usually the trap the .env comments warn about: a token
+        // issued before the app was switched to "Read and Write" stays
+        // read-only, which is a credential problem, not a content one.
+        const failure = response.status === 401 || response.status === 403 ? "auth" : "rejected";
+        throw new ChannelError(`X API rejected the post: ${message}`, "x", failure, body);
       }
 
       return {

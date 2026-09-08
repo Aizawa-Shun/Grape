@@ -1,5 +1,6 @@
 import { and, eq, gte, lte } from "drizzle-orm";
 
+import { AppError } from "@/core/errors";
 import { env } from "@/env";
 import { db, schema } from "@/db/client";
 
@@ -269,7 +270,7 @@ export async function getFunnelForRange(
   const lookbackStart = new Date(windowStart.getTime() - RETAIN_LOOKBACK_MS);
 
   const product = await db.query.products.findFirst({ where: eq(schema.products.id, productId) });
-  if (!product) throw new Error(`Unknown product: ${productId}`);
+  if (!product) throw new AppError("NOT_FOUND", `Unknown product: ${productId}`);
 
   const rows = await db.query.events.findMany({
     where: and(

@@ -81,10 +81,36 @@ export interface LLMProvider {
 }
 
 /** Raised when a provider answers but the answer is unusable. */
+/**
+ * What went wrong, in terms a caller can branch on. Every provider has to
+ * classify its own failures, because only the adapter knows whether a 401 from
+ * its endpoint means a bad key or a bad request — and string-matching the
+ * message at the boundary is exactly what this exists to avoid.
+ */
+export type LLMFailure =
+  | "unreachable"
+  | "timeout"
+  | "auth"
+  | "rate_limited"
+  /** Reached the model, but its output was not parseable JSON or failed the schema. */
+  | "bad_output"
+  /** The model declined on policy grounds. Distinct from bad output: retrying is pointless. */
+  | "refused"
+  | "server_error";
+
+/** Shared by the adapters that only have an HTTP status to go on. */
+export function failureForStatus(status: number): LLMFailure {
+  if (status === 401 || status === 403) return "auth";
+  if (status === 408 || status === 504) return "timeout";
+  if (status === 429) return "rate_limited";
+  return "server_error";
+}
+
 export class LLMError extends Error {
   constructor(
     message: string,
     readonly provider: string,
+    readonly failure: LLMFailure,
     readonly cause?: unknown,
   ) {
     super(message);

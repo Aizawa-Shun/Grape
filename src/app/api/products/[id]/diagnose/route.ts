@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { diagnoseProduct } from "@/core/intelligence/diagnose";
 import { recommendTasks } from "@/core/intelligence/recommend";
+import { route } from "@/server/http/route";
 
 export const runtime = "nodejs";
 
@@ -18,17 +19,12 @@ export const runtime = "nodejs";
  * someone looks at the dashboard would silently multiply that. The dashboard
  * shows whatever the *last* diagnosis said; this route is what advances it.
  */
-export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-
-  try {
+export const POST = route(
+  "diagnose.run",
+  async (_request: Request, { params }: { params: Promise<{ id: string }> }) => {
+    const { id } = await params;
     const diagnosis = await diagnoseProduct(id);
     const tasks = await recommendTasks(diagnosis);
     return NextResponse.json({ diagnosis, tasks }, { status: 201 });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : String(error) },
-      { status: 502 },
-    );
-  }
-}
+  },
+);

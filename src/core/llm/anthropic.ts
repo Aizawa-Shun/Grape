@@ -6,6 +6,7 @@ import {
   LLMError,
   type CompletionRequest,
   type CompletionResult,
+  type LLMFailure,
   type LLMProvider,
   type ProviderHealth,
   type StructuredCompletionRequest,
@@ -73,11 +74,26 @@ export class AnthropicProvider implements LLMProvider {
       `Request declined on policy grounds (${details?.category ?? "unknown"}): ` +
         `${details?.explanation ?? "no explanation given"}`,
       this.name,
+      "refused",
     );
   }
 
+  /**
+   * Turns the SDK's typed exceptions into this codebase's failure vocabulary.
+   * Without it a rate limit or a bad key escapes as a raw Anthropic error that
+   * the boundary can only classify as INTERNAL.
+   */
+  async #call<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (error) {
+      if (error instanceof LLMError) throw error;
+      throw new LLMError(describeAnthropicError(error), this.name, anthropicFailure(error), error);
+    }
+  }
+
   async completeText(req: CompletionRequest): Promise<CompletionResult<string>> {
-    const response = await this.#client.beta.messages.create({
+    const response = await this.#call(() => this.#client.beta.messages.create({
       model: this.model,
       max_tokens: req.maxTokens ?? DEFAULT_MAX_TOKENS,
       betas: [FALLBACK_BETA],
@@ -86,7 +102,7 @@ export class AnthropicProvider implements LLMProvider {
       output_config: { effort: EFFORT_BY_KIND[req.kind] },
       system: this.#system(req.system),
       messages: [{ role: "user", content: req.user }],
-    });
+    }));
 
     this.#assertUsable(response);
 
@@ -96,14 +112,14 @@ export class AnthropicProvider implements LLMProvider {
       .join("");
 
     if (text.trim() === "") {
-      throw new LLMError("Model returned no text content", this.name);
+      throw new LLMError("Model returned no text content", this.name, "bad_output");
     }
 
     return { value: text, usage: toUsage(response.usage), model: response.model };
   }
 
   async completeStructured<T>(req: StructuredCompletionRequest<T>): Promise<CompletionResult<T>> {
-    const response = await this.#client.beta.messages.parse({
+    const response = await this.#call(() => this.#client.beta.messages.parse({
       model: this.model,
       max_tokens: req.maxTokens ?? DEFAULT_MAX_TOKENS,
       betas: [FALLBACK_BETA],
@@ -115,7 +131,7 @@ export class AnthropicProvider implements LLMProvider {
       },
       system: this.#system(req.system),
       messages: [{ role: "user", content: req.user }],
-    });
+    }));
 
     this.#assertUsable(response);
 
@@ -123,6 +139,7 @@ export class AnthropicProvider implements LLMProvider {
       throw new LLMError(
         `Model output did not satisfy schema "${req.schemaName}"`,
         this.name,
+        "bad_output",
       );
     }
 
@@ -156,6 +173,15 @@ export class AnthropicProvider implements LLMProvider {
       };
     }
   }
+}
+
+/** Same typed-exception ladder as describeAnthropicError, in the shared vocabulary. */
+function anthropicFailure(error: unknown): LLMFailure {
+  if (error instanceof Anthropic.AuthenticationError) return "auth";
+  if (error instanceof Anthropic.RateLimitError) return "rate_limited";
+  if (error instanceof Anthropic.APIConnectionTimeoutError) return "timeout";
+  if (error instanceof Anthropic.APIConnectionError) return "unreachable";
+  return "server_error";
 }
 
 function describeAnthropicError(error: unknown): string {

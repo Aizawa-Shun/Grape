@@ -67,6 +67,7 @@ export function parseStructured<T>(raw: string, schema: ZodType<T>, provider: st
     throw new LLMError(
       `Model output for "${schemaName}" was not valid JSON: ${raw.slice(0, 300)}`,
       provider,
+      "bad_output",
       error,
     );
   }
@@ -76,7 +77,11 @@ export function parseStructured<T>(raw: string, schema: ZodType<T>, provider: st
     const detail = parsed.error.issues
       .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
       .join("; ");
-    throw new LLMError(`Model output did not satisfy schema "${schemaName}": ${detail}`, provider);
+    throw new LLMError(
+      `Model output did not satisfy schema "${schemaName}": ${detail}`,
+      provider,
+      "bad_output",
+    );
   }
   return parsed.data;
 }

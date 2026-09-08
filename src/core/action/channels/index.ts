@@ -1,7 +1,7 @@
 import { env } from "@/env";
 import type { Channel } from "@/db/schema";
 
-import type { ActionChannel } from "../channel";
+import { ChannelError, type ActionChannel } from "../channel";
 import { manualChannel } from "./manual";
 import { createXChannel } from "./x";
 
@@ -21,8 +21,10 @@ export function getChannel(name: Channel): ActionChannel {
     case "x": {
       const { X_CONSUMER_KEY, X_CONSUMER_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET } = env;
       if (!X_CONSUMER_KEY || !X_CONSUMER_SECRET || !X_ACCESS_TOKEN || !X_ACCESS_TOKEN_SECRET) {
-        throw new Error(
+        throw new ChannelError(
           "X channel is not configured — set X_CONSUMER_KEY, X_CONSUMER_SECRET, X_ACCESS_TOKEN and X_ACCESS_TOKEN_SECRET",
+          "x",
+          "auth",
         );
       }
       return createXChannel({

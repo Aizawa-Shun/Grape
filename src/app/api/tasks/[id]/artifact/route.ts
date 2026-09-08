@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { generateArtifact } from "@/core/action/generate";
+import { route } from "@/server/http/route";
 
 export const runtime = "nodejs";
 
@@ -12,16 +13,11 @@ export const runtime = "nodejs";
  * reasoning as Product Context versioning: a discarded draft should not
  * silently disappear from the record.
  */
-export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-
-  try {
+export const POST = route(
+  "artifact.generate",
+  async (_request: Request, { params }: { params: Promise<{ id: string }> }) => {
+    const { id } = await params;
     const artifact = await generateArtifact(id);
     return NextResponse.json({ artifact }, { status: 201 });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : String(error) },
-      { status: 502 },
-    );
-  }
-}
+  },
+);

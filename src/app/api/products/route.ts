@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { registerProduct } from "@/core/product/register";
 import { db } from "@/db/client";
+import { route } from "@/server/http/route";
 
 export const runtime = "nodejs";
 
@@ -11,12 +12,12 @@ const RegisterInputSchema = z.object({
   name: z.string().optional(),
 });
 
-export async function GET() {
+export const GET = route("products.list", async () => {
   const products = await db.query.products.findMany({
     orderBy: (products, { desc }) => [desc(products.createdAt)],
   });
   return NextResponse.json({ products });
-}
+});
 
 /**
  * Synchronous on purpose for the MVP: crawling ~5 pages plus one extraction
@@ -24,20 +25,8 @@ export async function GET() {
  * model), which is well inside a browser fetch timeout. Move this to a
  * background job only once that stops being true.
  */
-export async function POST(request: Request) {
-  const body = await request.json().catch(() => null);
-  const parsed = RegisterInputSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Invalid input" }, { status: 400 });
-  }
-
-  try {
-    const result = await registerProduct(parsed.data);
-    return NextResponse.json(result, { status: 201 });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : String(error) },
-      { status: 502 },
-    );
-  }
-}
+export const POST = route("products.create", async (request) => {
+  const input = RegisterInputSchema.parse(await request.json().catch(() => null));
+  const result = await registerProduct(input);
+  return NextResponse.json(result, { status: 201 });
+});

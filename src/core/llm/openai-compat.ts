@@ -2,6 +2,7 @@ import { parseStructured, stripThinkBlocks, toProviderJsonSchema } from "./json-
 import {
   EMPTY_USAGE,
   LLMError,
+  failureForStatus,
   type CompletionRequest,
   type CompletionResult,
   type LLMProvider,
@@ -60,13 +61,14 @@ export class OpenAICompatProvider implements LLMProvider {
         }),
       });
     } catch (error) {
-      throw new LLMError(`Could not reach ${this.#baseUrl}`, this.name, error);
+      throw new LLMError(`Could not reach ${this.#baseUrl}`, this.name, "unreachable", error);
     }
 
     if (!response.ok) {
       throw new LLMError(
         `Endpoint returned ${response.status}: ${(await response.text()).slice(0, 300)}`,
         this.name,
+        failureForStatus(response.status),
       );
     }
 

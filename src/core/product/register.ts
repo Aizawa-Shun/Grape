@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 
 import { crawlSite } from "@/core/context/crawl";
+import { AppError } from "@/core/errors";
 import { extractProductContext } from "@/core/context/extract";
 import { getProvider } from "@/core/llm";
 import { db, schema } from "@/db/client";
@@ -24,7 +25,7 @@ export interface RegisterProductResult {
 
 export async function registerProduct(input: { url: string; name?: string }): Promise<RegisterProductResult> {
   const url = normalizeUrl(input.url);
-  if (!url) throw new Error(`Not a valid URL: ${input.url}`);
+  if (!url) throw new AppError("INVALID_INPUT", `Not a valid URL: ${input.url}`);
 
   const name = input.name?.trim() || new URL(url).hostname;
 

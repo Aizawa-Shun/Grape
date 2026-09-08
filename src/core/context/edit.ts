@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 
+import { AppError } from "@/core/errors";
 import { db, schema } from "@/db/client";
 
 /**
@@ -26,7 +27,7 @@ export async function saveEditedContext(productId: string, edits: ContextEditInp
   });
 
   if (current.length === 0) {
-    throw new Error(`Product ${productId} has no context to edit yet`);
+    throw new AppError("NOT_FOUND", `Product ${productId} has no context to edit yet`);
   }
 
   const latest = current.reduce((max, row) => (row.version > max.version ? row : max));

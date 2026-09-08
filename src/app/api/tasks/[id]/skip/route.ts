@@ -1,19 +1,15 @@
 import { NextResponse } from "next/server";
 
 import { skipTask } from "@/core/action/execute";
+import { route } from "@/server/http/route";
 
 export const runtime = "nodejs";
 
-export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-
-  try {
+export const POST = route(
+  "task.skip",
+  async (_request: Request, { params }: { params: Promise<{ id: string }> }) => {
+    const { id } = await params;
     const task = await skipTask(id);
     return NextResponse.json({ task });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : String(error) },
-      { status: 404 },
-    );
-  }
-}
+  },
+);

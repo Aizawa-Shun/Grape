@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { evaluateOutcome } from "@/core/intelligence/outcomes";
+import { route } from "@/server/http/route";
 
 export const runtime = "nodejs";
 
@@ -10,16 +11,11 @@ export const runtime = "nodejs";
  * a fair before/after comparison needs a full window of data *after*
  * completion too, which by definition has not happened yet at that moment.
  */
-export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-
-  try {
+export const POST = route(
+  "outcome.evaluate",
+  async (_request: Request, { params }: { params: Promise<{ id: string }> }) => {
+    const { id } = await params;
     const outcome = await evaluateOutcome(id);
     return NextResponse.json({ outcome }, { status: 201 });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : String(error) },
-      { status: 400 },
-    );
-  }
-}
+  },
+);

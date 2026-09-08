@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { renderContextSnapshot } from "@/core/context/snapshot";
+import { AppError } from "@/core/errors";
 import { getProvider, type LLMProvider } from "@/core/llm";
 import { db, schema, type Database } from "@/db/client";
 import type { Channel } from "@/db/schema";
@@ -85,7 +86,7 @@ export async function recommendTasks(diagnosis: Diagnosis, options: RecommendOpt
   const now = options.now ?? new Date();
 
   const product = await conn.query.products.findFirst({ where: eq(schema.products.id, diagnosis.productId) });
-  if (!product) throw new Error(`Unknown product: ${diagnosis.productId}`);
+  if (!product) throw new AppError("NOT_FOUND", `Unknown product: ${diagnosis.productId}`);
 
   const contextVersion = await conn.query.productContexts.findFirst({
     where: and(
@@ -95,7 +96,8 @@ export async function recommendTasks(diagnosis: Diagnosis, options: RecommendOpt
   });
 
   if (!contextVersion) {
-    throw new Error(
+    throw new AppError(
+      "CONFLICT",
       `Product ${diagnosis.productId} has no Product Context v${diagnosis.contextVersion} (the version diagnosis ${diagnosis.id} reasoned over)`,
     );
   }

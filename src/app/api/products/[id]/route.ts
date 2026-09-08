@@ -2,7 +2,9 @@ import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { AppError } from "@/core/errors";
 import { db, schema } from "@/db/client";
+import { route } from "@/server/http/route";
 
 export const runtime = "nodejs";
 
@@ -13,31 +15,23 @@ export const runtime = "nodejs";
  * field rather than doubling as a general product-update endpoint.
  */
 const PatchInputSchema = z.object({
-  keyEventName: z
-    .string()
-    .trim()
-    .min(1)
-    .max(200)
-    .nullable(),
+  keyEventName: z.string().trim().min(1).max(200).nullable(),
 });
 
-export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const body = await request.json().catch(() => null);
-  const parsed = PatchInputSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Invalid input" }, { status: 400 });
-  }
+export const PATCH = route(
+  "products.patch",
+  async (request: Request, { params }: { params: Promise<{ id: string }> }) => {
+    const { id } = await params;
+    const input = PatchInputSchema.parse(await request.json().catch(() => null));
 
-  const [updated] = await db
-    .update(schema.products)
-    .set({ keyEventName: parsed.data.keyEventName })
-    .where(eq(schema.products.id, id))
-    .returning();
+    const [updated] = await db
+      .update(schema.products)
+      .set({ keyEventName: input.keyEventName })
+      .where(eq(schema.products.id, id))
+      .returning();
 
-  if (!updated) {
-    return NextResponse.json({ error: "Product not found" }, { status: 404 });
-  }
+    if (!updated) throw new AppError("NOT_FOUND", `No product ${id}`);
 
-  return NextResponse.json({ product: updated });
-}
+    return NextResponse.json({ product: updated });
+  },
+);

@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { renderContextSnapshot } from "@/core/context/snapshot";
+import { AppError } from "@/core/errors";
 import { getFunnel, type FunnelResult } from "@/core/data/funnel";
 import { getProvider, type LLMProvider } from "@/core/llm";
 import { db, schema, type Database } from "@/db/client";
@@ -141,13 +142,13 @@ export async function diagnoseProduct(productId: string, options: DiagnoseOption
   const provider = options.provider ?? getProvider();
 
   const product = await conn.query.products.findFirst({ where: eq(schema.products.id, productId) });
-  if (!product) throw new Error(`Unknown product: ${productId}`);
+  if (!product) throw new AppError("NOT_FOUND", `Unknown product: ${productId}`);
 
   const context = await conn.query.productContexts.findFirst({
     where: eq(schema.productContexts.productId, productId),
     orderBy: (contexts, { desc }) => [desc(contexts.version)],
   });
-  if (!context) throw new Error(`Product ${productId} has no Product Context yet — register it first.`);
+  if (!context) throw new AppError("CONFLICT", `Product ${productId} has no Product Context yet`);
 
   const funnel = await getFunnel(productId, { windowDays: options.windowDays, now: options.now });
 
