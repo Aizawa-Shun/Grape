@@ -1,36 +1,126 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Grape
 
-## Getting Started
+作ったサービスが使われない理由を調べて、次にやることを一つ出す道具です。
 
-First, run the development server:
+LLMのおかげでWebサービスは一人でも作れるようになりましたが、作ったあとに必要な
+マーケティングの知識も時間もない、という人のために作っています。
+専門用語は使いません。画面に出るのは「どこで人が離れているか」と「次に何をするか」だけです。
+
+一人で使う前提で、自分のパソコン上で動きます。認証もデータベースサーバーも要りません。
+
+## 何をするか
+
+1. サービスのURLを登録すると、サイトを読んで「何を・誰に・なぜ・どう」を整理します
+2. 計測用のコードをサイトに貼ると、訪問が届きはじめます
+3. どの段階で人が離れているかを**計算で**特定します（AIは使いません）
+4. その理由の説明と、今週やることをAIが書きます
+5. 実行する文面を作り、あなたが承認してから実行します
+6. 7日後に効果を測り、その結果が次の診断に入ります
+
+**ここが一番の設計方針です: 数える・比べる・順位をつけるのは全部コードでやり、
+AIは「なぜそうなっているか」を書くところにしか使いません。**
+どこが詰まっているかはAIの気分では変わりません。
+
+## はじめかた
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
+cp .env.example .env      # そのままでも動きます
+pnpm db:migrate           # データベースを作る
+pnpm dev                  # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+AIの接続先は `.env` の `LLM_PROVIDER` で選びます。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `anthropic`（既定）— `ANTHROPIC_API_KEY` を設定するか `ant auth login` を済ませておく
+- `ollama` — 手元のモデル。無料ですが遅いです（このマシンでは1.5Bで実用の下限でした）
+- `openai-compat` — OpenAI / LM Studio / vLLM / llama.cpp など
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### サイトから訪問を届けるには
 
-## Learn More
+計測用のコードはあなたのサイト（インターネット上）で動くので、
+`http://localhost:3000` には届きません。公開アドレスが要ります。
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+pnpm tunnel               # https://....trycloudflare.com が表示されます
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+表示されたアドレスを `.env` の `INGEST_BASE_URL` に書いて、サーバーを再起動します。
+アドレスはトンネルを開き直すたびに変わるので、Grapeは毎回その場でコードを作り直します。
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+> **トンネルを開くと、ダッシュボード全体もインターネットから見えます。**
+> `GRAPE_ADMIN_PASSWORD` を設定していない場合、Grapeは localhost 以外からのアクセスを
+> 503で断ります。トンネルを使うならパスワードを設定してください。
 
-## Deploy on Vercel
+## 外部への投稿について
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Xへの投稿は取り消せず、実費もかかります（1投稿およそ$0.015、リンク付きだと$0.20）。
+そのため:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- 文面を作る → 内容と費用を確認する → 実行する、の順で、**人間が承認しないと何も出ていきません**
+- `GRAPE_ACTION_DRY_RUN` は既定で練習モードです。`false` と**正確に**書いたときだけ本当に送ります
+  （打ち間違いが投稿につながらないように、そう作ってあります）
+
+## 日々の運用
+
+| したいこと | コマンド |
+|---|---|
+| 開発サーバーを動かす | `pnpm dev` |
+| 本番相当で動かす | `pnpm build && pnpm start` |
+| 型・書式・テストを全部見る | `pnpm typecheck && pnpm lint && pnpm test` |
+| バックアップを取る | `pnpm db:backup` |
+| 古い訪問データを消す | `pnpm db:prune` |
+| 状態を確認する | `curl localhost:3000/api/health` |
+
+### バックアップと復元
+
+```bash
+pnpm db:backup
+```
+
+`backups/` に日時つきのファイルができます（新しい14個を残して古いものは消えます）。
+サーバーを止めずに取れる、中身の整合した写しです。
+
+復元は3手順です。
+
+1. サーバーを止める
+2. `backups/grape-YYYYMMDD-HHMMSS.db` を `grape.db` に上書きコピーする
+3. `grape.db-wal` と `grape.db-shm` があれば消して、サーバーを起動し直す
+
+### データベースの変更
+
+```bash
+pnpm db:generate    # schema.ts の変更から SQL を作る
+#                     drizzle/ にできた .sql を目で確認してから↓
+pnpm db:migrate     # 適用する
+```
+
+`drizzle/` の中身は手で書き換えないでください。適用済みの内容と食い違うと、
+`/api/health` が「食い違っています」と言って止まります（それが分かるように入れてあります）。
+
+## つくり
+
+```
+src/
+  app/            画面とAPI
+  components/ui/  ボタンやカードなどの共通部品
+  core/
+    context/      サイトを読んで「何のサービスか」を整理する
+    data/         ファネルの計算（決定的）
+    intelligence/ 診断・提案・効果測定
+    action/       文面の生成と、承認・実行
+    llm/          AI接続先の差し替え可能な層
+    net/          外部へのアクセスの防御
+  server/         ログ・認証・流量制限・HTTPの共通処理
+  db/             スキーマとマイグレーション
+public/g.js       サイトに貼る計測用コード
+```
+
+AIの接続先を差し替えても、`src/core/llm/` の外は一行も変わりません。
+それがこの層を挟んでいる理由です。
+
+## 動作環境
+
+Node 20 以上、pnpm。データベースはSQLiteのファイルが1つできるだけです。
+クライアント側でしか描画されないサイトを読むときだけChromiumを使います
+（`npx playwright install chromium`。入っていなくても、静的なサイトは普通に読めます）。
