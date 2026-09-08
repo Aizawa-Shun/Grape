@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
+    "db:prune": "tsx src/db/prune.ts",
     "tunnel": "cloudflared tunnel --url http://localhost:3000"
   },
   "dependencies": {
