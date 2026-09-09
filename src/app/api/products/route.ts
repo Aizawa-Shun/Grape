@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { registerProduct } from "@/core/product/register";
-import { db, schema } from "@/db/client";
+import { db } from "@/db/client";
+import { requireUserId } from "@/server/auth/current-user";
 import { route } from "@/server/http/route";
 
 export const runtime = "nodejs";
@@ -14,6 +15,7 @@ const RegisterInputSchema = z.object({
 
 export const GET = route("products.list", async () => {
   const products = await db.query.products.findMany({
+    where: (products, { eq }) => eq(products.userId, requireUserId()),
     orderBy: (products, { desc }) => [desc(products.createdAt)],
   });
   return NextResponse.json({ products });
@@ -27,8 +29,6 @@ export const GET = route("products.list", async () => {
  */
 export const POST = route("products.create", async (request) => {
   const input = RegisterInputSchema.parse(await request.json().catch(() => null));
-  // Accounts do not exist yet, so LOCAL_USER is not a placeholder — it is who
-  // owns this product until the first person registers and adopts it.
-  const result = await registerProduct({ ...input, userId: schema.LOCAL_USER });
+  const result = await registerProduct({ ...input, userId: requireUserId() });
   return NextResponse.json(result, { status: 201 });
 });

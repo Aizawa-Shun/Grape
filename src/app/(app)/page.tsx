@@ -6,6 +6,7 @@ import { STAGE_UI } from "@/core/data/stages";
 import { buildBriefing } from "@/core/product/briefing";
 import { loadSnapshots } from "@/core/product/next-step";
 import { db } from "@/db/client";
+import { requireUser } from "@/server/auth/current-user";
 
 import { BriefingView } from "./briefing-view";
 import { RegisterProductForm } from "./register-product-form";
@@ -25,7 +26,8 @@ export const dynamic = "force-dynamic";
  * stays underneath as context rather than as the main event.
  */
 export default async function DashboardPage() {
-  const snapshots = await loadSnapshots();
+  const user = await requireUser();
+  const snapshots = await loadSnapshots(user.id);
   const briefing = buildBriefing(snapshots);
 
   const diagnoses = await Promise.all(

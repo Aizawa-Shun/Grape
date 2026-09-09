@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { diagnoseProduct } from "@/core/intelligence/diagnose";
+import { assertProductOwner } from "@/core/product/ownership";
+import { requireUserId } from "@/server/auth/current-user";
 import { recommendTasks } from "@/core/intelligence/recommend";
 import { route } from "@/server/http/route";
 
@@ -23,6 +25,10 @@ export const POST = route(
   "diagnose.run",
   async (_request: Request, { params }: { params: Promise<{ id: string }> }) => {
     const { id } = await params;
+    // Ownership first: everything below takes a bare id and would happily
+    // work on somebody else's product.
+    await assertProductOwner(id, requireUserId());
+
     const diagnosis = await diagnoseProduct(id);
     const tasks = await recommendTasks(diagnosis);
     return NextResponse.json({ diagnosis, tasks }, { status: 201 });

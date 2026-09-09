@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { adoptPreAccountRows } from "@/core/auth/users";
 import { AppError } from "@/core/errors";
 import { db, schema } from "@/db/client";
+import { currentUserId } from "@/server/context";
 import { env } from "@/env";
 import { DEV_USER_ID, SESSION_COOKIE, isLoopbackHost, readSession, sessionSecret } from "@/server/session";
 
@@ -77,6 +78,19 @@ export const currentUser = cache(async (): Promise<User | null> => {
   // the development account on its first request.
   return session.userId === DEV_USER_ID ? await createDeveloperAccount() : null;
 });
+
+/**
+ * The account id an API route is running for, from the scope the route wrapper
+ * opened. No database read and no cookie parsing — the verification already
+ * happened once at the edge of the request.
+ *
+ * Server components have no such scope and use `requireUser` instead.
+ */
+export function requireUserId(): string {
+  const userId = currentUserId();
+  if (!userId) throw new AppError("UNAUTHORIZED", "No session on a route that requires one");
+  return userId;
+}
 
 export async function requireUser(): Promise<User> {
   const user = await currentUser();

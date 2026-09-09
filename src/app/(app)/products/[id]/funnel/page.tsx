@@ -1,11 +1,11 @@
-import { eq } from "drizzle-orm";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { Callout } from "@/components/ui/callout";
 import { Page, PageHeader } from "@/components/ui/page";
 import { getFunnel } from "@/core/data/funnel";
-import { db, schema } from "@/db/client";
+import { findOwnedProduct } from "@/core/product/ownership";
+import { requireUser } from "@/server/auth/current-user";
 
 import { FunnelView } from "../funnel-view";
 
@@ -31,7 +31,9 @@ export default async function FunnelPage({
   const { windowDays: windowDaysParam } = await searchParams;
   const windowDays = parseWindowDays(windowDaysParam);
 
-  const product = await db.query.products.findFirst({ where: eq(schema.products.id, id) });
+  // Scoped to the signed-in account, and indistinguishable from a product that
+  // does not exist: a separate "not yours" would confirm the id is real.
+  const product = await findOwnedProduct(id, (await requireUser()).id);
   if (!product) notFound();
 
   const funnel = await getFunnel(id, { windowDays });

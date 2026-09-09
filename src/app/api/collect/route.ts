@@ -145,6 +145,18 @@ export async function POST(request: Request) {
 }
 
 /**
+ * This route deliberately has no ownership check, and must not grow one.
+ *
+ * It is unauthenticated by construction: the product id sits in a <script> tag
+ * on a public website, and the visitors it records have no account here. There
+ * is no session to check an owner against.
+ *
+ * Its tenancy check is the pair below instead — an event is accepted only when
+ * its Origin is the hostname the product was registered with. That is the same
+ * question assertProductOwner asks, answered with the only credential a
+ * browser on someone else's site can offer. The route reads nothing and writes
+ * only events belonging to that one product.
+ *
  * Cached because this runs on every pageview of the customer's site and the
  * answer changes only when they register a product.
  */

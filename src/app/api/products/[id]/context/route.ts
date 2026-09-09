@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { saveEditedContext } from "@/core/context/edit";
+import { assertProductOwner } from "@/core/product/ownership";
+import { requireUserId } from "@/server/auth/current-user";
 import { db, schema } from "@/db/client";
 import { route } from "@/server/http/route";
 
@@ -13,6 +15,8 @@ export const GET = route(
   "context.list",
   async (_request: Request, { params }: { params: Promise<{ id: string }> }) => {
     const { id } = await params;
+    await assertProductOwner(id, requireUserId());
+
     const versions = await db.query.productContexts.findMany({
       where: eq(schema.productContexts.productId, id),
       orderBy: (contexts, { desc }) => [desc(contexts.version)],
@@ -32,6 +36,8 @@ export const PUT = route(
   "context.save",
   async (request: Request, { params }: { params: Promise<{ id: string }> }) => {
     const { id } = await params;
+    await assertProductOwner(id, requireUserId());
+
     const input = EditInputSchema.parse(await request.json().catch(() => null));
     const result = await saveEditedContext(id, input);
     return NextResponse.json(result, { status: 201 });

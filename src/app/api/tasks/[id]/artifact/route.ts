@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { generateArtifact } from "@/core/action/generate";
+import { assertTaskOwner } from "@/core/product/ownership";
+import { requireUserId } from "@/server/auth/current-user";
 import { route } from "@/server/http/route";
 
 export const runtime = "nodejs";
@@ -17,6 +19,10 @@ export const POST = route(
   "artifact.generate",
   async (_request: Request, { params }: { params: Promise<{ id: string }> }) => {
     const { id } = await params;
+    // A task reaches its owner through its product, which is the only place
+    // tenancy is recorded.
+    await assertTaskOwner(id, requireUserId());
+
     const artifact = await generateArtifact(id);
     return NextResponse.json({ artifact }, { status: 201 });
   },

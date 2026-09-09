@@ -9,6 +9,7 @@ import {
 } from "@/core/settings";
 import { db } from "@/db/client";
 import { env } from "@/env";
+import { requireUser } from "@/server/auth/current-user";
 
 import { KeyEventForm } from "../products/[id]/key-event-form";
 import { TrackingSnippet } from "../products/[id]/tracking-snippet";
@@ -35,7 +36,9 @@ export default async function SettingsPage({
 }) {
   const { product: requested } = await searchParams;
 
+  const user = await requireUser();
   const products = await db.query.products.findMany({
+    where: (products, { eq }) => eq(products.userId, user.id),
     orderBy: (products, { asc }) => [asc(products.createdAt)],
   });
   const product =

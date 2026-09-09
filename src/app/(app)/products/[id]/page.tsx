@@ -5,7 +5,9 @@ import { Page, PageHeader, Section } from "@/components/ui/page";
 
 import { ContextEditor } from "./context-editor";
 
+import { findOwnedProduct } from "@/core/product/ownership";
 import { db, schema } from "@/db/client";
+import { requireUser } from "@/server/auth/current-user";
 
 /**
  * The ground everything else stands on.
@@ -18,7 +20,9 @@ import { db, schema } from "@/db/client";
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const product = await db.query.products.findFirst({ where: eq(schema.products.id, id) });
+  // Scoped to the signed-in account, and indistinguishable from a product that
+  // does not exist: a separate "not yours" would confirm the id is real.
+  const product = await findOwnedProduct(id, (await requireUser()).id);
   if (!product) notFound();
 
   const versions = await db.query.productContexts.findMany({

@@ -1,9 +1,10 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { AppError } from "@/core/errors";
 import { db, schema } from "@/db/client";
+import { requireUserId } from "@/server/auth/current-user";
 import { route } from "@/server/http/route";
 
 export const runtime = "nodejs";
@@ -24,13 +25,15 @@ export const PATCH = route(
     const { id } = await params;
     const input = PatchInputSchema.parse(await request.json().catch(() => null));
 
+    // The ownership check is the WHERE clause rather than a lookup before it:
+    // one statement, so there is no gap between deciding and writing.
     const [updated] = await db
       .update(schema.products)
       .set({ keyEventName: input.keyEventName })
-      .where(eq(schema.products.id, id))
+      .where(and(eq(schema.products.id, id), eq(schema.products.userId, requireUserId())))
       .returning();
 
-    if (!updated) throw new AppError("NOT_FOUND", `No product ${id}`);
+    if (!updated) throw new AppError("NOT_FOUND", `No product ${id} for this account`);
 
     return NextResponse.json({ product: updated });
   },

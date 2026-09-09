@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { approveAndExecute } from "@/core/action/execute";
+import { assertTaskOwner } from "@/core/product/ownership";
+import { requireUserId } from "@/server/auth/current-user";
 import { route } from "@/server/http/route";
 
 export const runtime = "nodejs";
@@ -23,6 +25,10 @@ export const POST = route(
   "task.approve",
   async (request: Request, { params }: { params: Promise<{ id: string }> }) => {
     const { id } = await params;
+    // The one route that can spend money and publish in public, so this is the
+    // last place an ownership check may be missing.
+    await assertTaskOwner(id, requireUserId());
+
     const input = ApproveInputSchema.parse(await request.json().catch(() => null));
     const run = await approveAndExecute(id, input.artifactId);
     return NextResponse.json({ run }, { status: 201 });

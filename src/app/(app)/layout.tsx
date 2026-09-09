@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 import { AppShell } from "@/components/nav/app-shell";
 import { loadNavProducts } from "@/core/product/nav";
-import { env } from "@/env";
+import { requireUser } from "@/server/auth/current-user";
 
 /**
  * Everything behind the sidebar. /login sits outside this group on purpose —
@@ -11,10 +11,11 @@ import { env } from "@/env";
 export const dynamic = "force-dynamic";
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
-  const products = await loadNavProducts();
+  const user = await requireUser();
+  const products = await loadNavProducts(user.id);
 
   return (
-    <AppShell products={products} authEnabled={Boolean(env.GRAPE_ADMIN_PASSWORD)}>
+    <AppShell products={products} authEnabled>
       {children}
     </AppShell>
   );

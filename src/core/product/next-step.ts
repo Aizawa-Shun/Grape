@@ -156,10 +156,16 @@ function brief(task: TaskSnapshot): StepTask {
 }
 
 /** Reads what pickNextStep needs. Separate so the decision itself stays pure. */
-export async function loadSnapshots(database?: Database): Promise<ProductSnapshot[]> {
+export async function loadSnapshots(
+  userId: string,
+  database?: Database,
+): Promise<ProductSnapshot[]> {
   const conn = database ?? db;
 
+  // Required rather than optional, for the same reason as loadNavProducts:
+  // this returns a list, and whose list it is cannot be an afterthought.
   const products = await conn.query.products.findMany({
+    where: eq(schema.products.userId, userId),
     orderBy: (products, { asc }) => [asc(products.createdAt)],
   });
 

@@ -3,7 +3,9 @@ import { notFound } from "next/navigation";
 
 import { estimateActionCostUsd } from "@/core/action/channel";
 import { Page, PageHeader } from "@/components/ui/page";
+import { findOwnedProduct } from "@/core/product/ownership";
 import { db, schema } from "@/db/client";
+import { requireUser } from "@/server/auth/current-user";
 import { env } from "@/env";
 
 import { DiagnosisPanel } from "../diagnosis-panel";
@@ -19,7 +21,9 @@ import { DiagnosisPanel } from "../diagnosis-panel";
 export default async function TasksPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const product = await db.query.products.findFirst({ where: eq(schema.products.id, id) });
+  // Scoped to the signed-in account, and indistinguishable from a product that
+  // does not exist: a separate "not yours" would confirm the id is real.
+  const product = await findOwnedProduct(id, (await requireUser()).id);
   if (!product) notFound();
 
   const latestDiagnosis =
