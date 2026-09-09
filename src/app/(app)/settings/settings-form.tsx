@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { type ReactNode, useState, useTransition } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,7 +21,7 @@ interface FieldSpec {
 
 interface Section {
   title: string;
-  description: string;
+  description: ReactNode;
   fields: FieldSpec[];
 }
 
@@ -30,7 +30,9 @@ interface Section {
  * The variable name is still shown, quietly, because it is what the README and
  * .env.example talk about and someone will need to match them up.
  */
-const SECTIONS: Section[] = [
+/** `monthSpendUsd` is only known at render time, so this is a function rather than a constant. */
+function buildSections(monthSpendUsd: number): Section[] {
+  return [
   {
     title: "AIの接続先",
     description: "「なぜそうなっているか」の説明文と、投稿の文面を書く相手です。",
@@ -58,6 +60,24 @@ const SECTIONS: Section[] = [
       },
       { key: "OPENAI_BASE_URL", label: "OpenAI互換のアドレス", hint: "LM StudioやvLLMなど。" },
       { key: "OPENAI_MODEL", label: "OpenAI互換のモデル名", hint: "例: gpt-4o-mini" },
+    ],
+  },
+  {
+    title: "支出の上限",
+    description: (
+      <>
+        今月はこれまでに約{" "}
+        <span className="font-medium tabular-nums text-text">${monthSpendUsd.toFixed(2)}</span>{" "}
+        使っています（Ollamaの利用分は含みません。実際の請求額とは差が出ることがあります）。
+      </>
+    ),
+    fields: [
+      {
+        key: "LLM_MONTHLY_BUDGET_USD",
+        label: "毎月の上限額（ドル）",
+        hint: "この額に達すると、来月まで新しいAI呼び出しを止めます。",
+        inputMode: "numeric",
+      },
     ],
   },
   {
@@ -124,24 +144,29 @@ const SECTIONS: Section[] = [
       },
     ],
   },
-];
+  ];
+}
 
 export function SettingsForm({
   values,
   defaults,
   overridden,
+  monthSpendUsd,
 }: {
   /** What is in effect right now. */
   values: SettingsValues;
   /** What .env alone would give — used for "戻す" and for the source badge. */
   defaults: SettingsValues;
   overridden: OverridableKey[];
+  /** This calendar month's estimated LLM spend so far — see core/llm/budget.ts. */
+  monthSpendUsd: number;
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState<SettingsValues>(values);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const sections = buildSections(monthSpendUsd);
 
   const overriddenNow = new Set(overridden);
   const dirty = (Object.keys(draft) as OverridableKey[]).some((key) => draft[key] !== values[key]);
@@ -177,7 +202,7 @@ export function SettingsForm({
 
   return (
     <div className="flex flex-col gap-8">
-      {SECTIONS.map((section) => (
+      {sections.map((section) => (
         <section key={section.title} className="flex flex-col gap-3">
           <div className="flex flex-col gap-0.5">
             <h2 className="text-sm font-medium">{section.title}</h2>

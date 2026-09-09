@@ -57,6 +57,19 @@ const EnvSchema = z.object({
    */
   LLM_MAX_REPAIRS: z.coerce.number().int().min(0).max(3).default(1),
 
+  /**
+   * Ceiling on estimated spend per calendar month, in USD, across every LLM
+   * call. Ollama has no bill, so this only bites anthropic and openai-compat —
+   * but it stays a single global limit rather than one per provider, because
+   * switching providers mid-month must not reset an exhausted budget.
+   *
+   * Deliberately small by default: this targets someone with no marketing
+   * budget, not someone who has already sized their AI spend. Raising it is
+   * one settings field; discovering it was unlimited after the fact is not
+   * something a $0-budget founder can undo.
+   */
+  LLM_MONTHLY_BUDGET_USD: z.coerce.number().positive().default(10),
+
   OLLAMA_BASE_URL: httpUrl("http://localhost:11434"),
   OLLAMA_MODEL: z.string().default("qwen2.5:1.5b-instruct"),
 

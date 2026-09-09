@@ -1,5 +1,7 @@
 import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
+import { TASK_KINDS } from "@/core/llm/types";
+
 /**
  * Grape's data model.
  *
@@ -276,6 +278,35 @@ export const outcomes = sqliteTable(
       .$defaultFn(() => new Date()),
   },
   (t) => [index("outcomes_task_idx").on(t.taskId)],
+);
+
+/**
+ * One row per model call, so `core/llm/budget.ts` can sum this month's
+ * estimated spend before the next call goes out.
+ *
+ * `productId` is nullable and `set null` rather than `cascade`: extraction
+ * runs during registration, before the product row that will reference it is
+ * committed, and a call already billed should not vanish because the product
+ * was later deleted — the point of this table is an accurate spend history,
+ * not a per-product one.
+ */
+export const llmCalls = sqliteTable(
+  "llm_calls",
+  {
+    id: id(),
+    productId: text("product_id").references(() => products.id, { onDelete: "set null" }),
+    taskKind: text("task_kind", { enum: TASK_KINDS }).notNull(),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    inputTokens: integer("input_tokens").notNull(),
+    outputTokens: integer("output_tokens").notNull(),
+    cacheReadInputTokens: integer("cache_read_input_tokens").notNull().default(0),
+    cacheCreationInputTokens: integer("cache_creation_input_tokens").notNull().default(0),
+    /** Estimated, not billed — see core/llm/pricing.ts for the rate table and its caveats. */
+    costUsd: real("cost_usd").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("llm_calls_created_idx").on(t.createdAt)],
 );
 
 /**

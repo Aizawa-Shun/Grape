@@ -29,6 +29,13 @@
       "when": 1788850111872,
       "tag": "0003_regular_korvac",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1788952062025,
+      "tag": "0004_oval_tenebrous",
+      "breakpoints": true
     }
   ]
 }

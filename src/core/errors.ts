@@ -34,6 +34,7 @@ export const ERROR_CODES = [
   "LLM_RATE_LIMITED",
   "LLM_BAD_OUTPUT",
   "LLM_REFUSED",
+  "LLM_BUDGET_EXCEEDED",
 
   "CHANNEL_AUTH",
   "CHANNEL_FAILED",
@@ -77,6 +78,7 @@ const LLM_FAILURE_CODES = {
   bad_output: "LLM_BAD_OUTPUT",
   refused: "LLM_REFUSED",
   server_error: "LLM_UNREACHABLE",
+  budget_exceeded: "LLM_BUDGET_EXCEEDED",
 } as const;
 
 const CHANNEL_FAILURE_CODES = {

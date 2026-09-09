@@ -1,5 +1,6 @@
 import { Callout } from "@/components/ui/callout";
 import { Page, PageHeader, Section } from "@/components/ui/page";
+import { monthSpendUsd } from "@/core/llm/budget";
 import {
   currentOverrides,
   loadSettings,
@@ -42,6 +43,7 @@ export default async function SettingsPage({
 
   const settings = await loadSettings();
   const overrides = currentOverrides();
+  const spentThisMonth = await monthSpendUsd();
 
   const ingestReachable = !/localhost|127\.0\.0\.1/.test(settings.INGEST_BASE_URL);
   const configuredKeys = [
@@ -85,6 +87,7 @@ export default async function SettingsPage({
         values={publicSettings(settings)}
         defaults={publicSettings(env)}
         overridden={Object.keys(overrides) as OverridableKey[]}
+        monthSpendUsd={spentThisMonth}
       />
 
       <div className="border-t border-border" />

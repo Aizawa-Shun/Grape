@@ -96,7 +96,9 @@ export type LLMFailure =
   | "bad_output"
   /** The model declined on policy grounds. Distinct from bad output: retrying is pointless. */
   | "refused"
-  | "server_error";
+  | "server_error"
+  /** Grape's own spend guard refused the call before it reached the model. */
+  | "budget_exceeded";
 
 /** Shared by the adapters that only have an HTTP status to go on. */
 export function failureForStatus(status: number): LLMFailure {
