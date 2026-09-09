@@ -27,7 +27,10 @@ export function Badge({
   return (
     <span
       className={cx(
-        "inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-xs font-medium",
+        // A pill rather than a slightly-rounded rectangle: at the small sizes
+        // this renders at, a 2px corner radius look almost square and reads
+        // as an unstyled default rather than a deliberate chip.
+        "inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium",
         TONES[tone],
         className,
       )}

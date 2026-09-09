@@ -15,15 +15,15 @@ import { useDismiss } from "./use-dismiss";
  *
  * Grape has no user table and no billing — it is one person on one machine
  * behind one password — so the identity line states the mode it is actually
- * running in rather than inventing a name and a subscription. The destinations
- * that do not exist yet say so on arrival; a menu that quietly leads nowhere
- * costs more trust than a missing item.
+ * running in rather than inventing a name and a subscription. This used to
+ * also link to an account-settings and a billing page, each just a promise
+ * that name/email/password fields or a plan and an invoice would show up
+ * eventually. They never could: this app has no user table to hold them and
+ * no plan to bill. A menu item that points at a future the architecture
+ * rules out costs more trust than not having the item.
  */
 const LINKS: { href: string; label: string; icon: IconName }[] = [
-  { href: "/account", label: "アカウント設定", icon: "user" },
-  { href: "/billing", label: "プランと請求", icon: "card" },
   { href: "/guide", label: "使い方ガイド", icon: "book" },
-  { href: "/help", label: "ヘルプ・お問い合わせ", icon: "help" },
 ];
 
 export function AccountMenu({ authEnabled }: { authEnabled: boolean }) {
@@ -74,7 +74,7 @@ export function AccountMenu({ authEnabled }: { authEnabled: boolean }) {
       {open && (
         <div
           role="menu"
-          className="absolute bottom-full left-0 right-0 z-20 mb-1 overflow-hidden rounded-md border border-border bg-surface py-1 shadow-lg"
+          className="animate-popover absolute bottom-full left-0 right-0 z-20 mb-1 origin-bottom overflow-hidden rounded-md border border-border bg-surface py-1 shadow-lg"
         >
           {LINKS.map((link) => (
             <Link

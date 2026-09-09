@@ -73,12 +73,6 @@ export const ICONS = {
       <path d="m3.5 8.5 3 3 6-7" />
     </Glyph>
   ),
-  plus: (
-    <Glyph>
-      <path d="M8 3.5v9" />
-      <path d="M3.5 8h9" />
-    </Glyph>
-  ),
   menu: (
     <Glyph>
       <path d="M2.5 4.5h11" />
@@ -92,29 +86,10 @@ export const ICONS = {
       <path d="m12 4-8 8" />
     </Glyph>
   ),
-  user: (
-    <Glyph>
-      <circle cx="8" cy="5.5" r="2.75" />
-      <path d="M2.75 14c.6-2.6 2.7-4 5.25-4s4.65 1.4 5.25 4" />
-    </Glyph>
-  ),
-  card: (
-    <Glyph>
-      <rect x="1.75" y="3.75" width="12.5" height="8.5" rx="1.5" />
-      <path d="M1.75 6.75h12.5" />
-    </Glyph>
-  ),
   book: (
     <Glyph>
       <path d="M3 2.5h5a2 2 0 0 1 2 2v9a1.5 1.5 0 0 0-1.5-1.5H3v-9.5Z" />
       <path d="M13 2.5H9.5a2 2 0 0 0-2 2v9a1.5 1.5 0 0 1 1.5-1.5H13v-9.5Z" />
-    </Glyph>
-  ),
-  help: (
-    <Glyph>
-      <circle cx="8" cy="8" r="6.25" />
-      <path d="M6.25 6.25a1.75 1.75 0 1 1 2.4 1.62c-.4.16-.65.55-.65.98v.4" />
-      <path d="M8 11.75h.01" />
     </Glyph>
   ),
   logout: (

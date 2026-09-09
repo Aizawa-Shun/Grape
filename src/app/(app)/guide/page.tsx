@@ -107,6 +107,28 @@ export default function GuidePage() {
               さらに既定では「練習モード」で、本当に送るには設定ファイルを書き換える必要があります。
             </dd>
           </div>
+          <div className="flex flex-col gap-1">
+            <dt className="font-medium">うまく動かないときは？</dt>
+            <dd className="text-text-muted">
+              {/*
+                Grape runs on one person's own machine with no support desk
+                behind it, so a "問い合わせフォーム" would have had nobody on
+                the other end. These two tools are real and already built:
+                the health check and the debug log level answer the two
+                questions that actually come up — "is it running at all" and
+                "what did the AI just do".
+              */}
+              まず{" "}
+              <code className="rounded bg-surface-sunken px-1 py-0.5 font-mono text-xs">
+                curl localhost:3000/api/health
+              </code>{" "}
+              でデータベースとAIへの接続を確認してください。AIの返事の中身まで見たいときは、
+              <Link href="/settings" className="underline underline-offset-2">
+                設定
+              </Link>
+              の「記録」でログの詳しさを debug にすると、次の操作から詳しく残るようになります。
+            </dd>
+          </div>
         </dl>
       </section>
 

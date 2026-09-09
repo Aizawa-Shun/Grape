@@ -70,7 +70,7 @@ export function ProductSwitcher({
       {open && (
         <div
           role="menu"
-          className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-md border border-border bg-surface py-1 shadow-lg"
+          className="animate-popover absolute left-0 right-0 top-full z-20 mt-1 origin-top overflow-hidden rounded-md border border-border bg-surface py-1 shadow-lg"
         >
           {products.map((product) => (
             <Link

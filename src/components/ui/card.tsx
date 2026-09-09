@@ -14,7 +14,7 @@ interface Props {
 
 const EMPHASIS = {
   default: "border-border bg-surface shadow-card",
-  attention: "border-attention-border bg-attention-bg",
+  attention: "border-attention-border bg-attention-bg shadow-card",
 } as const;
 
 export function Card({ as: Tag = "div", emphasis = "default", className, children }: Props) {

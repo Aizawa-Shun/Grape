@@ -7,10 +7,12 @@ type Variant = "primary" | "secondary" | "ghost" | "danger";
 type Size = "sm" | "md";
 
 const VARIANTS: Record<Variant, string> = {
-  primary: "bg-accent text-accent-fg font-medium hover:opacity-90",
-  secondary: "border border-border-strong text-text hover:bg-surface-sunken",
+  // shadow-sm only on the two variants meant to look pressable from across
+  // the room — a bordered secondary/ghost button already reads as one.
+  primary: "bg-accent text-accent-fg font-medium shadow-sm hover:opacity-90",
+  secondary: "border border-border-strong text-text hover:border-text-subtle hover:bg-surface-sunken",
   ghost: "text-text-subtle hover:bg-surface-sunken hover:text-text",
-  danger: "border border-negative text-negative hover:bg-negative hover:text-surface",
+  danger: "border border-negative text-negative shadow-sm hover:bg-negative hover:text-surface",
 };
 
 const SIZES: Record<Size, string> = {
@@ -47,7 +49,11 @@ export function Button({
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       className={cx(
-        "inline-flex items-center justify-center rounded-md transition-opacity disabled:cursor-not-allowed disabled:opacity-50",
+        // `active:scale` is the one purely cosmetic addition here — a button
+        // that only changes colour on press reads as flat under a cursor
+        // that is visibly pushing it. Every other change on this line
+        // (colour, border, shadow) was already conditional on some state.
+        "inline-flex items-center justify-center rounded-md transition-[color,background-color,border-color,box-shadow,opacity,scale] duration-150 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100",
         VARIANTS[variant],
         SIZES[size],
         focusRing,

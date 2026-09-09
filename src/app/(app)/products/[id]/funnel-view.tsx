@@ -134,7 +134,7 @@ export function FunnelView({ productId, funnel, windowDays }: Props) {
                       }}
                     />
                   </div>
-                  <span className="w-16 shrink-0 text-right text-sm font-medium tabular-nums">
+                  <span className="w-16 shrink-0 text-right text-sm font-semibold tabular-nums">
                     {stage.sessions} 人
                   </span>
                 </div>
