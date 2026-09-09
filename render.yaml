@@ -5,8 +5,8 @@
 # 51 database call sites, the 8 cascade deletes and the migration history that
 # /api/health verifies all keep working untouched.
 #
-# Two things are deliberately NOT set here and must be filled in on Render:
-# ANTHROPIC_API_KEY and GRAPE_ADMIN_PASSWORD (see `sync: false` below).
+# One thing is deliberately NOT set here and must be filled in on Render:
+# ANTHROPIC_API_KEY (see `sync: false` below).
 
 services:
   - type: web
@@ -61,15 +61,14 @@ services:
       - key: ANTHROPIC_API_KEY
         sync: false
 
-      # Required, not optional, the moment this is not localhost: src/proxy.ts
-      # refuses every non-local request with 503 until a password exists, so
-      # without this the whole dashboard is unreachable by design.
-      - key: GRAPE_ADMIN_PASSWORD
-        sync: false
-
       # Generated once by Render and kept, so a deploy does not sign everyone
-      # out. Optional in env.ts — it derives from the password otherwise — but
-      # pinning it keeps sessions independent of a password change.
+      # out. Required, not optional, the moment this is not localhost:
+      # src/proxy.ts refuses every non-local request with 503 until a signing
+      # key exists, so without this the dashboard is unreachable by design.
+      #
+      # There is no admin password to set alongside it. The first person to
+      # open the deployed URL registers the owner account, and everyone after
+      # them needs an invitation from that account.
       - key: GRAPE_SESSION_SECRET
         generateValue: true
 

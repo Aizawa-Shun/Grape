@@ -7,6 +7,7 @@ import { cx, focusRing } from "@/components/ui/cx";
 import type { NavProduct } from "@/core/product/nav";
 
 import { ICONS } from "./icons";
+import type { AccountSummary } from "./account-menu";
 import { Sidebar } from "./sidebar";
 
 /**
@@ -18,11 +19,11 @@ import { Sidebar } from "./sidebar";
  */
 export function AppShell({
   products,
-  authEnabled,
+  account,
   children,
 }: {
   products: NavProduct[];
-  authEnabled: boolean;
+  account: AccountSummary;
   children: ReactNode;
 }) {
   const pathname = usePathname();
@@ -46,7 +47,7 @@ export function AppShell({
   return (
     <div className="flex min-h-full">
       <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 border-r border-border bg-surface-sunken lg:block">
-        <Sidebar products={products} authEnabled={authEnabled} />
+        <Sidebar products={products} account={account} />
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -85,11 +86,7 @@ export function AppShell({
                 {ICONS.close}
               </button>
             </div>
-            <Sidebar
-              products={products}
-              authEnabled={authEnabled}
-              onNavigate={() => setOpen(false)}
-            />
+            <Sidebar products={products} account={account} onNavigate={() => setOpen(false)} />
           </div>
         </div>
       )}

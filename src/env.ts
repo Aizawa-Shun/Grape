@@ -113,12 +113,11 @@ const EnvSchema = z.object({
   GRAPE_EVENT_RETENTION_DAYS: z.coerce.number().int().positive().default(180),
 
   /**
-   * Guards the dashboard. Unset is allowed and means "localhost only" — see
-   * src/proxy.ts. It stops being optional the moment the app is reachable
-   * from anywhere else.
+   * Signs the session cookie, and so decides whether there can be sessions at
+   * all. Unset is allowed only on a developer's machine, where a non-production
+   * build reached over loopback falls back to a well-known key — see
+   * src/server/session.ts. Anywhere else, unset means every page answers 503.
    */
-  GRAPE_ADMIN_PASSWORD: z.string().optional(),
-  /** Defaults to a value derived from the password, so one variable is enough. */
   GRAPE_SESSION_SECRET: z.string().optional(),
 
   // --- Operations ---------------------------------------------------------
@@ -180,3 +179,21 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
 }
 
 export const env: Env = parseEnv(process.env);
+
+/**
+ * GRAPE_ADMIN_PASSWORD was the whole authentication system: one shared
+ * password, and a session cookie whose key was derived from it. Passwords are
+ * now per-account and hashed, so there is nothing left for it to do and
+ * nothing left to derive a key from.
+ *
+ * Said out loud rather than ignored in silence, because an operator who still
+ * has it in their .env is holding a belief about how this instance is guarded
+ * that stopped being true.
+ */
+if (process.env.GRAPE_ADMIN_PASSWORD) {
+  console.warn(
+    "[grape] GRAPE_ADMIN_PASSWORD is no longer used and is being ignored. " +
+      "Accounts have their own passwords now; GRAPE_SESSION_SECRET is what signs sessions. " +
+      "You can remove it from .env.",
+  );
+}

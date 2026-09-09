@@ -7,7 +7,6 @@ describe("OVERRIDABLE_KEYS", () => {
     for (const secret of [
       "ANTHROPIC_API_KEY",
       "OPENAI_API_KEY",
-      "GRAPE_ADMIN_PASSWORD",
       "GRAPE_SESSION_SECRET",
       "X_CONSUMER_KEY",
       "X_CONSUMER_SECRET",
@@ -94,7 +93,6 @@ describe("publicSettings", () => {
       {
         ANTHROPIC_API_KEY: "sk-ant-should-never-leave",
         OPENAI_API_KEY: "sk-openai-secret",
-        GRAPE_ADMIN_PASSWORD: "hunter2",
         GRAPE_SESSION_SECRET: "signing-key",
         X_CONSUMER_SECRET: "x-secret",
         DATABASE_URL: "file:./grape.db",
@@ -107,7 +105,6 @@ describe("publicSettings", () => {
     for (const secret of [
       "sk-ant-should-never-leave",
       "sk-openai-secret",
-      "hunter2",
       "signing-key",
       "x-secret",
     ]) {

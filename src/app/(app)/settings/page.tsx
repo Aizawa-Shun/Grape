@@ -53,7 +53,7 @@ export default async function SettingsPage({
     { label: "Anthropic APIキー", set: Boolean(env.ANTHROPIC_API_KEY) },
     { label: "OpenAI互換 APIキー", set: Boolean(env.OPENAI_API_KEY) },
     { label: "Xの認証情報", set: Boolean(env.X_CONSUMER_KEY && env.X_ACCESS_TOKEN) },
-    { label: "管理パスワード", set: Boolean(env.GRAPE_ADMIN_PASSWORD) },
+    { label: "セッション鍵", set: Boolean(env.GRAPE_SESSION_SECRET) },
   ];
 
   return (

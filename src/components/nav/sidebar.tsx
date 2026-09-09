@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { cx, focusRing } from "@/components/ui/cx";
 import type { NavProduct } from "@/core/product/nav";
 
-import { AccountMenu } from "./account-menu";
+import { AccountMenu, type AccountSummary } from "./account-menu";
 import { ICONS, type IconName } from "./icons";
 import { ProductSwitcher } from "./product-switcher";
 
@@ -78,11 +78,11 @@ export function currentProductId(pathname: string, products: NavProduct[]): stri
 
 export function Sidebar({
   products,
-  authEnabled,
+  account,
   onNavigate,
 }: {
   products: NavProduct[];
-  authEnabled: boolean;
+  account: AccountSummary;
   /** Lets the mobile drawer close itself when a link is followed. */
   onNavigate?: () => void;
 }) {
@@ -129,7 +129,7 @@ export function Sidebar({
         />
       </nav>
 
-      <AccountMenu authEnabled={authEnabled} />
+      <AccountMenu account={account} />
     </div>
   );
 }
