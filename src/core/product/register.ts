@@ -23,7 +23,12 @@ export interface RegisterProductResult {
   extraction: Awaited<ReturnType<typeof extractProductContext>>;
 }
 
-export async function registerProduct(input: { url: string; name?: string }): Promise<RegisterProductResult> {
+export async function registerProduct(input: {
+  url: string;
+  name?: string;
+  /** Who ends up owning the row. Required: a product with no owner is one nobody can be shown. */
+  userId: string;
+}): Promise<RegisterProductResult> {
   const url = normalizeUrl(input.url);
   if (!url) throw new AppError("INVALID_INPUT", `Not a valid URL: ${input.url}`);
 
@@ -31,7 +36,7 @@ export async function registerProduct(input: { url: string; name?: string }): Pr
 
   const [product] = await db
     .insert(schema.products)
-    .values({ url, name })
+    .values({ url, name, userId: input.userId })
     .onConflictDoUpdate({
       target: [schema.products.userId, schema.products.url],
       set: { name },

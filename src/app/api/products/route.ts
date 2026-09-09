@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { registerProduct } from "@/core/product/register";
-import { db } from "@/db/client";
+import { db, schema } from "@/db/client";
 import { route } from "@/server/http/route";
 
 export const runtime = "nodejs";
@@ -27,6 +27,8 @@ export const GET = route("products.list", async () => {
  */
 export const POST = route("products.create", async (request) => {
   const input = RegisterInputSchema.parse(await request.json().catch(() => null));
-  const result = await registerProduct(input);
+  // Accounts do not exist yet, so LOCAL_USER is not a placeholder — it is who
+  // owns this product until the first person registers and adopts it.
+  const result = await registerProduct({ ...input, userId: schema.LOCAL_USER });
   return NextResponse.json(result, { status: 201 });
 });

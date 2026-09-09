@@ -14,12 +14,19 @@ import { TASK_KINDS } from "@/core/llm/types";
  * `outcomes` is what closes the loop. Without it Grape only ever recommends;
  * it never learns whether a recommendation worked.
  *
- * Every table carries `user_id` even though the MVP runs single-user with no
- * auth. Adding the column now is free; back-filling a tenant key into a
- * populated database later is not.
+ * Tenancy hangs off `products.user_id`. Every other table reaches its owner
+ * through `product_id` or `task_id`, so it is the one column that has to be
+ * right. `llm_calls` is the exception that also carries `user_id` directly:
+ * it has no product for some calls, and unlike a default, who made a past
+ * call cannot be worked out after the fact.
  */
 
-const LOCAL_USER = "local";
+/**
+ * The owner every product had before there were accounts. Rows still carrying
+ * it are adopted by the first person to register (core/auth/users.ts); nothing
+ * writes it any more, which is why `products.user_id` no longer defaults to it.
+ */
+export const LOCAL_USER = "local";
 
 const id = () =>
   text("id")
@@ -51,13 +58,62 @@ export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
 export const ACTION_RUN_STATUSES = ["pending", "dry_run", "sent", "failed"] as const;
 export type ActionRunStatus = (typeof ACTION_RUN_STATUSES)[number];
 
+export const USER_ROLES = ["owner", "member"] as const;
+export type UserRole = (typeof USER_ROLES)[number];
+
+// --- Accounts ---------------------------------------------------------------
+
+/**
+ * `passwordHash` is scrypt with its parameters embedded — see
+ * server/auth/password.ts. There is no e-mail sender anywhere in Grape, so
+ * there is deliberately no reset token here: recovery is the owner re-issuing
+ * an invite, or `pnpm db:reset-password` on the server.
+ *
+ * "owner" is the first account to register and the only one that can invite.
+ */
+export const users = sqliteTable(
+  "users",
+  {
+    id: id(),
+    email: text("email").notNull(),
+    displayName: text("display_name").notNull(),
+    passwordHash: text("password_hash").notNull(),
+    role: text("role", { enum: USER_ROLES }).notNull().default("member"),
+    createdAt: createdAt(),
+    lastLoginAt: integer("last_login_at", { mode: "timestamp_ms" }),
+  },
+  (t) => [uniqueIndex("users_email_idx").on(t.email)],
+);
+
+/**
+ * Registration is closed once one account exists, so a second person needs a
+ * code from the first.
+ *
+ * Only the hash is stored, for the same reason passwords are not kept in
+ * plaintext: a stolen database should not hand over working credentials. The
+ * code itself exists once, in the response that created it.
+ */
+export const invites = sqliteTable(
+  "invites",
+  {
+    id: id(),
+    codeHash: text("code_hash").notNull(),
+    invitedBy: text("invited_by").references(() => users.id, { onDelete: "set null" }),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    usedAt: integer("used_at", { mode: "timestamp_ms" }),
+    usedBy: text("used_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("invites_code_idx").on(t.codeHash)],
+);
+
 // --- ① PRODUCT --------------------------------------------------------------
 
 export const products = sqliteTable(
   "products",
   {
     id: id(),
-    userId: text("user_id").notNull().default(LOCAL_USER),
+    userId: text("user_id").notNull(),
     url: text("url").notNull(),
     name: text("name").notNull(),
     /**
@@ -289,12 +345,19 @@ export const outcomes = sqliteTable(
  * committed, and a call already billed should not vanish because the product
  * was later deleted — the point of this table is an accurate spend history,
  * not a per-product one.
+ *
+ * `userId` is nullable on the same grounds plus one more: scripts and tests
+ * spend nothing on anyone's behalf, and a call made before accounts existed
+ * has no owner to name. It is recorded from the moment there is a session to
+ * read it from, because who made a call is not something that can be worked
+ * out later.
  */
 export const llmCalls = sqliteTable(
   "llm_calls",
   {
     id: id(),
     productId: text("product_id").references(() => products.id, { onDelete: "set null" }),
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
     taskKind: text("task_kind", { enum: TASK_KINDS }).notNull(),
     provider: text("provider").notNull(),
     model: text("model").notNull(),
@@ -306,7 +369,10 @@ export const llmCalls = sqliteTable(
     costUsd: real("cost_usd").notNull(),
     createdAt: createdAt(),
   },
-  (t) => [index("llm_calls_created_idx").on(t.createdAt)],
+  (t) => [
+    index("llm_calls_created_idx").on(t.createdAt),
+    index("llm_calls_user_created_idx").on(t.userId, t.createdAt),
+  ],
 );
 
 /**
