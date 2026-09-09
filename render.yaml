@@ -1,0 +1,86 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+#
+# One web service with a persistent disk, which is the whole reason Render was
+# chosen over the alternatives: grape.db stays an ordinary SQLite file, so the
+# 51 database call sites, the 8 cascade deletes and the migration history that
+# /api/health verifies all keep working untouched.
+#
+# Two things are deliberately NOT set here and must be filled in on Render:
+# ANTHROPIC_API_KEY and GRAPE_ADMIN_PASSWORD (see `sync: false` below).
+
+services:
+  - type: web
+    name: grape
+    runtime: node
+    region: singapore
+
+    # A disk cannot be attached to a free instance, and a free instance also
+    # spins down when idle — which would defeat the scheduled loop this move
+    # exists to enable. 0.5c-512mb is the cheaper option if 2 GB is more than
+    # this needs; a Next build is the memory-hungry part, and that runs on
+    # Render's build machine rather than here.
+    plan: 1c-2g
+
+    # --prod=false because `pnpm db:migrate` runs tsx, and tsx is a
+    # devDependency. A production-only install would leave the start command
+    # with no way to apply migrations.
+    buildCommand: pnpm install --frozen-lockfile --prod=false && pnpm build
+
+    # Migrations run here rather than in buildCommand or preDeployCommand
+    # because those run on machines where this service's disk is not mounted —
+    # and the database lives on the disk. drizzle's migrator records what it
+    # has applied, so running on every boot is a no-op after the first.
+    startCommand: pnpm db:migrate && pnpm start
+
+    # Public, and cheap for an unauthenticated caller: with no session cookie
+    # /api/health checks the database and returns, skipping the model probe.
+    # A health check that woke the LLM every minute would bill for uptime.
+    healthCheckPath: /api/health
+
+    disk:
+      name: grape-data
+      mountPath: /var/data
+      sizeGB: 1
+
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+
+      # On the disk, not in the container filesystem, which is replaced on
+      # every deploy.
+      - key: DATABASE_URL
+        value: file:/var/data/grape.db
+
+      # Ollama runs on your own machine and does not exist here, so the local
+      # provider is not an option on this host.
+      - key: LLM_PROVIDER
+        value: anthropic
+
+      # Entered on Render, never in this file. `ant auth login` is not a way to
+      # be authenticated on a server, so unlike locally, the key is required.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+      # Required, not optional, the moment this is not localhost: src/proxy.ts
+      # refuses every non-local request with 503 until a password exists, so
+      # without this the whole dashboard is unreachable by design.
+      - key: GRAPE_ADMIN_PASSWORD
+        sync: false
+
+      # Generated once by Render and kept, so a deploy does not sign everyone
+      # out. Optional in env.ts — it derives from the password otherwise — but
+      # pinning it keeps sessions independent of a password change.
+      - key: GRAPE_SESSION_SECRET
+        generateValue: true
+
+      # Left for the dashboard because the service's own URL is not known until
+      # it first deploys. It is also editable from /settings afterwards without
+      # a restart, since settings live in SQLite.
+      - key: INGEST_BASE_URL
+        sync: false
+
+      # Anything but the exact string "false" keeps practice mode on. Stated
+      # explicitly rather than left to the default, because this is now a
+      # server that could post to a real X account unattended.
+      - key: GRAPE_ACTION_DRY_RUN
+        value: "true"
