@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { Card } from "@/components/ui/card";
+import { GrapeMark } from "@/components/ui/grape-mark";
 import { accountsExist } from "@/core/auth/users";
 
 import { LoginForm } from "./login-form";
@@ -25,6 +26,7 @@ export default async function LoginPage({
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col justify-center gap-6 px-4 py-16">
       <header className="flex flex-col gap-1">
+        <GrapeMark size={40} className="mb-2" />
         <h1 className="text-2xl font-semibold tracking-tight">Grape</h1>
         <p className="text-sm text-text-muted">メールアドレスとパスワードでログインしてください。</p>
       </header>

@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { cx, focusRing } from "@/components/ui/cx";
+import { GrapeMark } from "@/components/ui/grape-mark";
 import type { NavProduct } from "@/core/product/nav";
 
 import { ICONS } from "./icons";
@@ -61,7 +62,10 @@ export function AppShell({
           >
             {ICONS.menu}
           </button>
-          <span className="text-sm font-semibold tracking-tight">Grape</span>
+          <span className="flex items-center gap-1.5 text-sm font-semibold tracking-tight">
+            <GrapeMark size={18} />
+            Grape
+          </span>
         </header>
 
         <main className="flex flex-1 flex-col">{children}</main>

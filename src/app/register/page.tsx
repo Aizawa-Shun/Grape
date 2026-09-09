@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { Callout } from "@/components/ui/callout";
 import { Card } from "@/components/ui/card";
+import { GrapeMark } from "@/components/ui/grape-mark";
 import { accountsExist } from "@/core/auth/users";
 
 import { RegisterForm } from "./register-form";
@@ -26,6 +27,7 @@ export default async function RegisterPage({
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col justify-center gap-6 px-4 py-16">
       <header className="flex flex-col gap-1">
+        <GrapeMark size={40} className="mb-2" />
         <h1 className="text-2xl font-semibold tracking-tight">Grape</h1>
         <p className="text-sm text-text-muted">
           {first

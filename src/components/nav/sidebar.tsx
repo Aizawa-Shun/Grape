@@ -6,6 +6,8 @@ import { usePathname } from "next/navigation";
 import { cx, focusRing } from "@/components/ui/cx";
 import type { NavProduct } from "@/core/product/nav";
 
+import { GrapeMark } from "@/components/ui/grape-mark";
+
 import { AccountMenu, type AccountSummary } from "./account-menu";
 import { ICONS, type IconName } from "./icons";
 import { ProductSwitcher } from "./product-switcher";
@@ -104,8 +106,12 @@ export function Sidebar({
         <Link
           href="/"
           onClick={onNavigate}
-          className={cx("text-lg font-semibold tracking-tight", focusRing)}
+          className={cx(
+            "flex items-center gap-2 text-lg font-semibold tracking-tight",
+            focusRing,
+          )}
         >
+          <GrapeMark size={22} />
           Grape
         </Link>
         <ProductSwitcher products={products} current={current} hrefFor={hrefForProduct} />

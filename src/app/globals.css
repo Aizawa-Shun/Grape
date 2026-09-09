@@ -146,3 +146,15 @@ body {
     transform: scale(0.98);
   }
 }
+
+/*
+ * The logo is one colour on transparency, so a dark surface needs it flipped
+ * rather than swapped: inverting solid black gives solid white, which is
+ * exactly the mark a near-black sidebar wants. A second asset would be two
+ * files to keep in step for one bit of information.
+ */
+@media (prefers-color-scheme: dark) {
+  .logo-mark {
+    filter: invert(1);
+  }
+}
