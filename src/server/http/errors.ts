@@ -47,7 +47,7 @@ const CATALOG: Record<ErrorCode, Entry> = {
   },
   UNAUTHORIZED: {
     status: 401,
-    text: "ログインが必要です。パスワードを入力してください。",
+    text: "ログインが必要です。メールアドレスとパスワードを入力してください。",
   },
 
   CRAWL_UNREACHABLE: {

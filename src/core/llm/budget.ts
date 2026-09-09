@@ -1,6 +1,7 @@
 import { gte, sql } from "drizzle-orm";
 
 import { currentSettings } from "@/core/settings";
+import { currentUserId } from "@/server/context";
 import { db, schema, type Database } from "@/db/client";
 
 import { estimateCostUsd } from "./pricing";
@@ -90,12 +91,20 @@ export interface RecordCallInput {
   model: string;
   usage: Usage;
   productId?: string;
+  /** Overrides the ambient session, for callers that already know the owner. */
+  userId?: string;
 }
 
 export async function recordCall(input: RecordCallInput, database: Database = db): Promise<void> {
   const costUsd = estimateCostUsd(input.provider, input.model, input.usage);
   await database.insert(schema.llmCalls).values({
     productId: input.productId,
+    // Read here, per call, rather than captured when the provider was wrapped:
+    // getProvider() caches one provider across requests, so a user captured at
+    // construction would have every later caller's spend billed to them.
+    // Undefined for scripts and tests, which is honest — nobody asked for
+    // those.
+    userId: input.userId ?? currentUserId(),
     // Assumed valid: every caller currently in this codebase passes a
     // `TaskKind` from `CompletionRequest`, which the schema's own type already
     // constrains. Widened to `string` here only so this module does not need

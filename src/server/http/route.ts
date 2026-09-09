@@ -4,7 +4,8 @@ import { toAppError } from "@/core/errors";
 import { loadSettings } from "@/core/settings";
 import { dbReady } from "@/db/client";
 
-import { runWithRequestId } from "../context";
+import { sessionUserIdFor } from "../auth/current-user";
+import { runInRequestScope } from "../context";
 import { describeError, log } from "../log";
 import { describeForUser, statusOf } from "./errors";
 
@@ -32,8 +33,12 @@ export function route<Ctx>(
   return async (request, context) => {
     const requestId = request.headers.get(REQUEST_ID_HEADER) ?? crypto.randomUUID();
     const startedAt = Date.now();
+    // Verified from the cookie, not loaded from the database: this runs on
+    // every request including the ingest path. Undefined on the public routes,
+    // which is why nothing downstream may assume there is an account.
+    const userId = await sessionUserIdFor(request);
 
-    return runWithRequestId(requestId, async () => {
+    return runInRequestScope({ requestId, userId }, async () => {
       const path = new URL(request.url).pathname;
 
       try {

@@ -9,6 +9,7 @@ import { Status } from "@/components/ui/status";
 
 export function LoginForm({ next }: { next: string }) {
   const router = useRouter();
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -23,7 +24,7 @@ export function LoginForm({ next }: { next: string }) {
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ email, password }),
       });
       const body = await response.json().catch(() => ({}));
 
@@ -38,13 +39,26 @@ export function LoginForm({ next }: { next: string }) {
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
-      <Field label="パスワード" hint=".env の GRAPE_ADMIN_PASSWORD に設定した値です。">
+      <Field label="メールアドレス">
+        {(props) => (
+          <input
+            {...props}
+            type="email"
+            autoComplete="username"
+            autoFocus
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className={controlClass}
+          />
+        )}
+      </Field>
+
+      <Field label="パスワード">
         {(props) => (
           <input
             {...props}
             type="password"
             autoComplete="current-password"
-            autoFocus
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             className={controlClass}
@@ -54,8 +68,13 @@ export function LoginForm({ next }: { next: string }) {
 
       {error && <Status tone="error">{error}</Status>}
 
-      <Button type="submit" variant="primary" loading={pending} disabled={password.length === 0}>
-        {pending ? "確認中…" : "開く"}
+      <Button
+        type="submit"
+        variant="primary"
+        loading={pending}
+        disabled={email.length === 0 || password.length === 0}
+      >
+        {pending ? "確認中…" : "ログイン"}
       </Button>
     </form>
   );

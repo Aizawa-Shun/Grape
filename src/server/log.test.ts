@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { runWithRequestId } from "./context";
+import { runInRequestScope } from "./context";
 import { describeError, log } from "./log";
 
 function captureLines() {
@@ -52,7 +52,7 @@ describe("log", () => {
   it("stamps the surrounding request id without being handed it", () => {
     const lines = captureLines();
 
-    runWithRequestId("req-123", () => {
+    runInRequestScope({ requestId: "req-123" }, () => {
       log.warn("crawl.browser_unavailable", { reason: "chromium missing" });
     });
 
@@ -62,7 +62,7 @@ describe("log", () => {
   it("carries the request id across awaits, which is the only reason it exists", async () => {
     const lines = captureLines();
 
-    await runWithRequestId("req-456", async () => {
+    await runInRequestScope({ requestId: "req-456" }, async () => {
       await Promise.resolve();
       await new Promise((resolve) => setTimeout(resolve, 1));
       log.info("llm.call");

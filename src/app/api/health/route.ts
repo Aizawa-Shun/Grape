@@ -5,7 +5,7 @@ import { dbReady, sqlClient } from "@/db/client";
 import { describeMigrationStatus, migrationStatus, readJournal } from "@/db/migration-status";
 import { loadSettings } from "@/core/settings";
 import { env } from "@/env";
-import { readSession, sessionSecret } from "@/server/session";
+import { currentUser } from "@/server/auth/current-user";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,12 +20,10 @@ export async function GET(request: Request) {
   // Public so that an uptime check needs no credentials — but a public
   // endpoint should not hand a stranger the ingest URL, the provider and the
   // model name, nor let them spend a token by asking for the LLM probe.
-  const secret = await sessionSecret(env.GRAPE_SESSION_SECRET, env.GRAPE_ADMIN_PASSWORD);
-  const session = secret
-    ? await readSession(request.headers.get("cookie")?.match(/grape_session=([^;]+)/)?.[1], secret)
-    : { valid: true, shouldRenew: false };
-
-  if (!session.valid) {
+  // Asked through the same resolver the rest of the app uses rather than
+  // re-reading the cookie here: two implementations of "who is this" is one
+  // more than can be kept in agreement.
+  if (!(await currentUser())) {
     await dbReady;
     const { ok } = await checkDatabase();
     return NextResponse.json({ ok }, { status: ok ? 200 : 503 });
