@@ -19,14 +19,24 @@ import { useDismiss } from "./use-dismiss";
  * This used to link to an account-settings and a billing page, each just a
  * promise that name/email/password fields or a plan and an invoice would show
  * up eventually, and both were deleted because the architecture ruled them
- * out. Half of that reasoning has expired — there is a user table now — and
- * half has not: Grape is self-hosted and bills nobody, so プランと請求 stays
- * gone, and a test keeps it gone. The account screens are a separate piece of
- * work; this menu does not link to them until they exist, for the original
- * reason. A menu item that points at a future the architecture rules out
- * costs more trust than not having the item.
+ * out. That reasoning has since split in two.
+ *
+ * アカウント came back, because the half that ruled it out expired: there is a
+ * users table now, and every field on /account writes to a real column. 招待
+ * is new here and old underneath — POST /api/auth/invites has worked since
+ * registration closed, with no way to reach it but curl. AI利用料 is what
+ * プランと請求 could honestly become: not a plan or an invoice, which this app
+ * still has neither of, but the estimated spend it really does record.
+ *
+ * プランと請求 itself stays gone, and a test keeps it gone. A menu item that
+ * points at a future the architecture rules out costs more trust than not
+ * having the item.
  */
-const LINKS: { href: string; label: string; icon: IconName }[] = [
+const LINKS: { href: string; label: string; icon: IconName; ownerOnly?: boolean }[] = [
+  { href: "/account", label: "アカウント", icon: "account" },
+  { href: "/settings", label: "設定", icon: "settings" },
+  { href: "/invites", label: "招待", icon: "invite", ownerOnly: true },
+  { href: "/usage", label: "AI利用料", icon: "usage" },
   { href: "/guide", label: "使い方ガイド", icon: "book" },
 ];
 
@@ -34,6 +44,8 @@ const LINKS: { href: string; label: string; icon: IconName }[] = [
 export interface AccountSummary {
   displayName: string;
   email: string;
+  /** Members do not see 招待; the endpoint behind it refuses them anyway. */
+  role: "owner" | "member";
 }
 
 export function AccountMenu({ account }: { account: AccountSummary }) {
@@ -84,7 +96,7 @@ export function AccountMenu({ account }: { account: AccountSummary }) {
           role="menu"
           className="animate-popover absolute bottom-full left-0 right-0 z-20 mb-1 origin-bottom overflow-hidden rounded-md border border-border bg-surface py-1 shadow-lg"
         >
-          {LINKS.map((link) => (
+          {LINKS.filter((link) => !link.ownerOnly || account.role === "owner").map((link) => (
             <Link
               key={link.href}
               href={link.href}

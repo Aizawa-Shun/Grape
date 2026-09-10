@@ -6,7 +6,12 @@ import { AccountMenu } from "./account-menu";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }) }));
 
-const ACCOUNT = { displayName: "しゅん", email: "shun@example.com" };
+const ACCOUNT = { displayName: "しゅん", email: "shun@example.com", role: "owner" } as const;
+const MEMBER = { ...ACCOUNT, role: "member" } as const;
+
+async function openMenu() {
+  await userEvent.click(screen.getByRole("button", { name: /しゅん/ }));
+}
 
 describe("AccountMenu", () => {
   it("names the signed-in account", async () => {
@@ -29,10 +34,41 @@ describe("AccountMenu", () => {
   it("does not offer a billing page, which this app has nothing to put behind", async () => {
     render(<AccountMenu account={ACCOUNT} />);
 
-    await userEvent.click(screen.getByRole("button", { name: /しゅん/ }));
+    await openMenu();
 
     expect(screen.getByRole("menuitem", { name: /使い方ガイド/ })).toBeInTheDocument();
     expect(screen.queryByText("プランと請求")).not.toBeInTheDocument();
+  });
+
+  /**
+   * The items that came back, each because something real now sits behind it:
+   * a users table, an invite endpoint, and a recorded spend estimate.
+   */
+  it.each([
+    ["アカウント", "/account"],
+    ["設定", "/settings"],
+    ["招待", "/invites"],
+    ["AI利用料", "/usage"],
+    ["使い方ガイド", "/guide"],
+  ])("offers %s", async (label, href) => {
+    render(<AccountMenu account={ACCOUNT} />);
+
+    await openMenu();
+
+    expect(screen.getByRole("menuitem", { name: label })).toHaveAttribute("href", href);
+  });
+
+  /**
+   * Not a second authorisation — the endpoint refuses a member on its own.
+   * This keeps the menu from advertising a page that would only turn them away.
+   */
+  it("hides 招待 from a member, whom the endpoint would refuse anyway", async () => {
+    render(<AccountMenu account={MEMBER} />);
+
+    await openMenu();
+
+    expect(screen.queryByRole("menuitem", { name: "招待" })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "アカウント" })).toBeInTheDocument();
   });
 
   /**
@@ -44,7 +80,7 @@ describe("AccountMenu", () => {
   it("always offers to sign out", async () => {
     render(<AccountMenu account={ACCOUNT} />);
 
-    await userEvent.click(screen.getByRole("button", { name: /しゅん/ }));
+    await openMenu();
 
     expect(screen.getByRole("menuitem", { name: /ログアウト/ })).toBeInTheDocument();
   });

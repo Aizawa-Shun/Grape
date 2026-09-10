@@ -86,6 +86,28 @@ export const ICONS = {
       <path d="m12 4-8 8" />
     </Glyph>
   ),
+  account: (
+    <Glyph>
+      <circle cx="8" cy="5.5" r="2.75" />
+      <path d="M2.75 14c0-2.9 2.35-4.75 5.25-4.75s5.25 1.85 5.25 4.75" />
+    </Glyph>
+  ),
+  invite: (
+    <Glyph>
+      <circle cx="6" cy="5.5" r="2.75" />
+      <path d="M1.5 14c0-2.9 2-4.75 4.5-4.75 1 0 1.9.3 2.65.8" />
+      <path d="M12 8.5v5" />
+      <path d="M9.5 11h5" />
+    </Glyph>
+  ),
+  usage: (
+    <Glyph>
+      <path d="M2.5 13.5h11" />
+      <path d="M4.5 13.5V9" />
+      <path d="M8 13.5V4.5" />
+      <path d="M11.5 13.5v-3" />
+    </Glyph>
+  ),
   book: (
     <Glyph>
       <path d="M3 2.5h5a2 2 0 0 1 2 2v9a1.5 1.5 0 0 0-1.5-1.5H3v-9.5Z" />

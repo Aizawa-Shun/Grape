@@ -7,7 +7,16 @@ import { describe, expect, it } from "vitest";
 import * as schema from "@/db/schema";
 import type { Database } from "@/db/client";
 
-import { accountsExist, createInvite, redeemInvite, registerFirstUser } from "./users";
+import {
+  accountsExist,
+  changePassword,
+  createInvite,
+  listInvites,
+  redeemInvite,
+  registerFirstUser,
+  updateProfile,
+} from "./users";
+import { verifyPassword } from "@/server/auth/password";
 
 /**
  * A real migrated database rather than a mock: what is under test is a
@@ -200,5 +209,107 @@ describe("invites", () => {
 
     const found = await db.query.users.findFirst({ where: eq(schema.users.email, GUEST.email) });
     expect(found).toBeUndefined();
+  });
+});
+
+describe("updateProfile", () => {
+  it("renames and re-addresses the account, normalising the address as registration does", async () => {
+    const db = await testDb();
+    const user = await registerFirstUser(ACCOUNT, db);
+
+    const updated = await updateProfile(user.id, { displayName: " 新しい名前 ", email: "NEW@Example.COM" }, db);
+
+    expect(updated.displayName).toBe("新しい名前");
+    expect(updated.email).toBe("new@example.com");
+  });
+
+  it("refuses an address another account already holds", async () => {
+    const db = await testDb();
+    const owner = await registerFirstUser(ACCOUNT, db);
+    const invite = await createInvite(owner.id, db);
+    const member = await redeemInvite(
+      invite.code,
+      { email: "member@example.com", displayName: "Member", password: ACCOUNT.password },
+      db,
+    );
+
+    await expect(
+      updateProfile(member.id, { displayName: "Member", email: "owner@example.com" }, db),
+    ).rejects.toThrow(/already registered/i);
+  });
+
+  it("leaves the password alone, which is the other form's job", async () => {
+    const db = await testDb();
+    const user = await registerFirstUser(ACCOUNT, db);
+
+    await updateProfile(user.id, { displayName: "Owner", email: "moved@example.com" }, db);
+
+    const row = await db.query.users.findFirst({ where: eq(schema.users.id, user.id) });
+    expect(await verifyPassword(ACCOUNT.password, row!.passwordHash)).toBe(true);
+  });
+});
+
+describe("changePassword", () => {
+  it("replaces the hash once the current password verifies", async () => {
+    const db = await testDb();
+    const user = await registerFirstUser(ACCOUNT, db);
+
+    await changePassword(user.id, ACCOUNT.password, "an-even-longer-password", db);
+
+    const row = await db.query.users.findFirst({ where: eq(schema.users.id, user.id) });
+    expect(await verifyPassword("an-even-longer-password", row!.passwordHash)).toBe(true);
+    expect(await verifyPassword(ACCOUNT.password, row!.passwordHash)).toBe(false);
+  });
+
+  /** A borrowed session must not be enough to lock the owner out of their own instance. */
+  it("refuses without the current password, which the session alone does not prove", async () => {
+    const db = await testDb();
+    const user = await registerFirstUser(ACCOUNT, db);
+
+    await expect(
+      changePassword(user.id, "not-the-password", "an-even-longer-password", db),
+    ).rejects.toThrow(/current password/i);
+
+    const row = await db.query.users.findFirst({ where: eq(schema.users.id, user.id) });
+    expect(await verifyPassword(ACCOUNT.password, row!.passwordHash)).toBe(true);
+  });
+
+  it("holds the new password to the same minimum registration does", async () => {
+    const db = await testDb();
+    const user = await registerFirstUser(ACCOUNT, db);
+
+    await expect(changePassword(user.id, ACCOUNT.password, "short", db)).rejects.toThrow(
+      /shorter than the minimum/i,
+    );
+  });
+});
+
+describe("listInvites", () => {
+  it("reports state without ever handing the code back", async () => {
+    const db = await testDb();
+    const owner = await registerFirstUser(ACCOUNT, db);
+    const open = await createInvite(owner.id, db);
+    const spent = await createInvite(owner.id, db);
+    await redeemInvite(
+      spent.code,
+      { email: "member@example.com", displayName: "Member", password: ACCOUNT.password },
+      db,
+    );
+
+    const listed = await listInvites(db);
+
+    expect(listed.map((invite) => invite.state).sort()).toEqual(["open", "used"]);
+    expect(JSON.stringify(listed)).not.toContain(open.code);
+  });
+
+  it("calls an unused invite expired once its moment has passed, with no sweep to run", async () => {
+    const db = await testDb();
+    const owner = await registerFirstUser(ACCOUNT, db);
+    await createInvite(owner.id, db);
+
+    const wayLater = new Date(Date.now() + 400 * 24 * 60 * 60 * 1000);
+    const [invite] = await listInvites(db, wayLater);
+
+    expect(invite.state).toBe("expired");
   });
 });

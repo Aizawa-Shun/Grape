@@ -1,4 +1,4 @@
-import { gte, sql } from "drizzle-orm";
+import { desc, gte, sql } from "drizzle-orm";
 
 import { currentSettings } from "@/core/settings";
 import { currentUserId } from "@/server/context";
@@ -64,6 +64,89 @@ export async function monthSpendUsd(database: Database = db, now: Date = new Dat
     .from(schema.llmCalls)
     .where(gte(schema.llmCalls.createdAt, startOfMonth(now)));
   return rows[0]?.total ?? 0;
+}
+
+/**
+ * Where this month's estimate came from.
+ *
+ * /settings already shows the single total, next to the limit it is checked
+ * against — that is a setting with its context. This is the other question:
+ * having seen the number, which work produced it. Grouped in SQL rather than
+ * summed in the page, because the row count grows with every call ever made
+ * and the page only ever wants the groups.
+ *
+ * Estimated throughout, like everything built on `costUsd` — see pricing.ts.
+ */
+export interface SpendGroup {
+  key: string;
+  calls: number;
+  costUsd: number;
+}
+
+export interface RecentCall {
+  id: string;
+  taskKind: string;
+  model: string;
+  costUsd: number;
+  createdAt: Date;
+}
+
+export interface MonthUsage {
+  spentUsd: number;
+  budgetUsd: number;
+  byTaskKind: SpendGroup[];
+  byModel: SpendGroup[];
+  recent: RecentCall[];
+}
+
+/** How many recent calls the screen lists — enough to recognise a runaway loop. */
+const RECENT_LIMIT = 12;
+
+export async function monthUsage(
+  database: Database = db,
+  now: Date = new Date(),
+): Promise<MonthUsage> {
+  const since = startOfMonth(now);
+  const thisMonth = gte(schema.llmCalls.createdAt, since);
+
+  const group = async (column: typeof schema.llmCalls.taskKind | typeof schema.llmCalls.model) =>
+    (
+      await database
+        .select({
+          key: column,
+          calls: sql<number>`count(*)`,
+          costUsd: sql<number>`coalesce(sum(${schema.llmCalls.costUsd}), 0)`,
+        })
+        .from(schema.llmCalls)
+        .where(thisMonth)
+        .groupBy(column)
+        .orderBy(sql`sum(${schema.llmCalls.costUsd}) desc`)
+    ).map((row) => ({ key: row.key, calls: Number(row.calls), costUsd: row.costUsd }));
+
+  const [byTaskKind, byModel, recent] = await Promise.all([
+    group(schema.llmCalls.taskKind),
+    group(schema.llmCalls.model),
+    database
+      .select({
+        id: schema.llmCalls.id,
+        taskKind: schema.llmCalls.taskKind,
+        model: schema.llmCalls.model,
+        costUsd: schema.llmCalls.costUsd,
+        createdAt: schema.llmCalls.createdAt,
+      })
+      .from(schema.llmCalls)
+      .where(thisMonth)
+      .orderBy(desc(schema.llmCalls.createdAt))
+      .limit(RECENT_LIMIT),
+  ]);
+
+  return {
+    spentUsd: byTaskKind.reduce((total, row) => total + row.costUsd, 0),
+    budgetUsd: currentSettings().LLM_MONTHLY_BUDGET_USD,
+    byTaskKind,
+    byModel,
+    recent,
+  };
 }
 
 /**

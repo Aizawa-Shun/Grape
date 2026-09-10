@@ -34,6 +34,31 @@ afterEach(() => {
 });
 
 describe("proxy", () => {
+  /**
+   * The tab icon is fetched by a browser that has no session yet — on the
+   * login page, and on every tab of a signed-out visitor. Behind the session
+   * these redirect to /login and the browser is handed HTML where it asked
+   * for an image.
+   */
+  it.each(["/icon.png", "/apple-icon.png", "/icon1.png", "/icon.svg", "/favicon.ico"])(
+    "serves %s without a session, so the tab icon renders signed out",
+    async (path) => {
+      vi.stubEnv("GRAPE_SESSION_SECRET", SECRET);
+      vi.stubEnv("NODE_ENV", "production");
+
+      expect(outcome(await proxy(request(path, { host: "grape.example.com" }))).status).toBe(200);
+    },
+  );
+
+  it("does not open a page merely because its name starts with icon", async () => {
+    vi.stubEnv("GRAPE_SESSION_SECRET", SECRET);
+    vi.stubEnv("NODE_ENV", "production");
+
+    expect(outcome(await proxy(request("/icons", { host: "grape.example.com" })))).toMatchObject({
+      status: 307,
+    });
+  });
+
   it.each(["/api/collect", "/g.js", "/login", "/register", "/api/health"])(
     "lets %s through with no session at all",
     async (path) => {

@@ -4,7 +4,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { MIN_PASSWORD_LENGTH } from "@/core/auth/policy";
 import { AppError } from "@/core/errors";
 import { db, schema, type Database } from "@/db/client";
-import { hashPassword } from "@/server/auth/password";
+import { hashPassword, verifyPassword } from "@/server/auth/password";
 
 /**
  * Membership: the first person to arrive owns the instance, and everyone
@@ -31,6 +31,12 @@ export interface NewAccount {
   password: string;
 }
 
+/** What the account screen may change without proving anything. */
+export interface ProfileEdit {
+  email: string;
+  displayName: string;
+}
+
 export type User = typeof schema.users.$inferSelect;
 
 /**
@@ -44,7 +50,12 @@ function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-function validate(input: NewAccount): { email: string; displayName: string } {
+/**
+ * Split out from `validate` so editing a profile and creating an account
+ * enforce one rule each rather than two copies that can drift: a rename must
+ * accept exactly the names registration would have.
+ */
+function validateIdentity(input: ProfileEdit): { email: string; displayName: string } {
   const email = normalizeEmail(input.email);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new AppError("INVALID_INPUT", `Not an e-mail address: ${email}`, {
@@ -59,13 +70,21 @@ function validate(input: NewAccount): { email: string; displayName: string } {
     });
   }
 
-  if (input.password.length < MIN_PASSWORD_LENGTH) {
+  return { email, displayName };
+}
+
+function validatePassword(password: string): void {
+  if (password.length < MIN_PASSWORD_LENGTH) {
     throw new AppError("INVALID_INPUT", "Password shorter than the minimum", {
       hint: `パスワードは${MIN_PASSWORD_LENGTH}文字以上にしてください。`,
     });
   }
+}
 
-  return { email, displayName };
+function validate(input: NewAccount): { email: string; displayName: string } {
+  const identity = validateIdentity(input);
+  validatePassword(input.password);
+  return identity;
 }
 
 /**
@@ -161,6 +180,79 @@ export async function adoptPreAccountRows(tx: Queryable, userId: string): Promis
     .where(isNull(schema.llmCalls.userId));
 }
 
+// --- Account maintenance ----------------------------------------------------
+
+/**
+ * Rename, or move the account to a different address.
+ *
+ * No password is asked for. The session already proves who this is, and the
+ * two fields it changes are not credentials — an attacker holding the session
+ * can already read everything the account can see, so a re-prompt here would
+ * buy nothing and only teach people to retype their password on request.
+ * Changing the password itself is the operation that asks, below.
+ */
+export async function updateProfile(
+  userId: string,
+  input: ProfileEdit,
+  database: Database = db,
+): Promise<User> {
+  const { email, displayName } = validateIdentity(input);
+
+  try {
+    const [updated] = await database
+      .update(schema.users)
+      .set({ email, displayName })
+      .where(eq(schema.users.id, userId))
+      .returning();
+
+    if (!updated) throw new AppError("NOT_FOUND", `No such account: ${userId}`);
+    return updated;
+  } catch (error) {
+    // The same unique index registration walks into, reached from the other
+    // direction: moving onto an address someone else already holds.
+    if (isDuplicateEmail(error)) {
+      throw new AppError("CONFLICT", "e-mail already registered", {
+        hint: "そのメールアドレスはすでに登録されています。",
+      });
+    }
+    throw error;
+  }
+}
+
+/**
+ * The current password is required even though the session already proves
+ * identity, because this is the operation that would let a borrowed session
+ * become permanent access. Verifying it costs one scrypt derivation and closes
+ * that.
+ *
+ * The failure says only that the current password is wrong. There is nothing
+ * to hide about whether the account exists — the caller is signed in as it —
+ * but a second, more specific message would only be a place for the wording to
+ * drift away from what actually failed.
+ */
+export async function changePassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string,
+  database: Database = db,
+): Promise<void> {
+  validatePassword(newPassword);
+
+  const user = await database.query.users.findFirst({ where: eq(schema.users.id, userId) });
+  if (!user) throw new AppError("NOT_FOUND", `No such account: ${userId}`);
+
+  if (!(await verifyPassword(currentPassword, user.passwordHash))) {
+    throw new AppError("UNAUTHORIZED", "Current password does not verify", {
+      hint: "いまのパスワードが違います。",
+    });
+  }
+
+  await database
+    .update(schema.users)
+    .set({ passwordHash: await hashPassword(newPassword) })
+    .where(eq(schema.users.id, userId));
+}
+
 // --- Invitations ------------------------------------------------------------
 
 /** Crockford-style: no I, L, O or U, so a code read aloud or retyped survives. */
@@ -200,6 +292,44 @@ export async function createInvite(
  * real, and none of the three is separately actionable for the person holding
  * a code that does not work: they need a new one either way.
  */
+export type InviteState = "open" | "used" | "expired";
+
+export interface InviteSummary {
+  id: string;
+  createdAt: Date;
+  expiresAt: Date;
+  usedAt: Date | null;
+  state: InviteState;
+}
+
+/**
+ * What has been issued, never what was issued.
+ *
+ * The code is not in the row — only its hash — so this list cannot show it
+ * again, and the screen built on it has to say so. That is the honest shape:
+ * an owner who has lost a code issues another one, which is cheap, rather than
+ * Grape keeping a recoverable secret for the convenience.
+ *
+ * Expiry is computed rather than stored, so a row does not need a sweep to
+ * stop counting as usable.
+ */
+export async function listInvites(
+  database: Database = db,
+  now: Date = new Date(),
+): Promise<InviteSummary[]> {
+  const rows = await database.query.invites.findMany({
+    orderBy: (invites, { desc }) => [desc(invites.createdAt)],
+  });
+
+  return rows.map((row) => ({
+    id: row.id,
+    createdAt: row.createdAt,
+    expiresAt: row.expiresAt,
+    usedAt: row.usedAt,
+    state: row.usedAt ? "used" : row.expiresAt.getTime() <= now.getTime() ? "expired" : "open",
+  }));
+}
+
 export async function redeemInvite(
   code: string,
   input: NewAccount,

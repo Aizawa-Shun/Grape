@@ -45,9 +45,22 @@ const PUBLIC_PREFIXES = [
   "/favicon.ico",
 ];
 
+/**
+ * Next serves the app/ icon conventions from their own top-level routes, and
+ * every one of them was behind the session — so a signed-out browser followed
+ * a redirect to /login, got HTML where it expected an image, and showed the
+ * blank page icon. On the login page itself, next to the mark it does render.
+ *
+ * Matched exactly rather than by prefix: these are a fixed, generated set
+ * (including the numbered variants Next allows), and "/icon" as a prefix would
+ * quietly open any future route whose name began with it.
+ */
+const ICON_ROUTE = /^\/(icon|apple-icon)\d*\.(png|jpe?g|svg|ico)$/;
+
 export const REQUEST_ID_HEADER = "x-request-id";
 
 function isPublic(pathname: string): boolean {
+  if (ICON_ROUTE.test(pathname)) return true;
   return PUBLIC_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(prefix));
 }
 

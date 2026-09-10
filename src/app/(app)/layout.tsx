@@ -15,7 +15,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const products = await loadNavProducts(user.id);
 
   return (
-    <AppShell products={products} account={{ displayName: user.displayName, email: user.email }}>
+    <AppShell products={products} account={{ displayName: user.displayName, email: user.email, role: user.role }}>
       {children}
     </AppShell>
   );
