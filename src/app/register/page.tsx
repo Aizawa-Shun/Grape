@@ -1,8 +1,7 @@
-import Link from "next/link";
-
 import { Callout } from "@/components/ui/callout";
 import { Card } from "@/components/ui/card";
 import { GrapeMark } from "@/components/ui/grape-mark";
+import { TextLink } from "@/components/ui/text-link";
 import { accountsExist } from "@/core/auth/users";
 
 import { RegisterForm } from "./register-form";
@@ -39,14 +38,24 @@ export default async function RegisterPage({
       {!first && !invite ? (
         <Callout tone="attention">
           このGrapeはすでに使われているので、登録には招待が必要です。オーナーに招待リンクを発行してもらってください。
-          <Link href="/login" className="ml-1 underline">
-            ログインはこちら
-          </Link>
         </Callout>
       ) : (
         <Card>
           <RegisterForm first={first} code={invite ?? ""} />
         </Card>
+      )}
+
+      {/*
+        Offered whenever there is an account to log into, which is exactly when
+        `first` is false — including alongside the invitation form, where the
+        reader may already have an account and have followed the link anyway.
+        Deliberately absent on a fresh instance: /login redirects back here
+        while nobody has registered, so the link would only be a loop.
+      */}
+      {!first && (
+        <p className="text-sm text-text-muted">
+          すでにアカウントをお持ちですか？ <TextLink href="/login">ログイン</TextLink>
+        </p>
       )}
     </main>
   );

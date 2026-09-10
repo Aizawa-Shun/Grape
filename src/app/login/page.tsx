@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { Card } from "@/components/ui/card";
 import { GrapeMark } from "@/components/ui/grape-mark";
+import { TextLink } from "@/components/ui/text-link";
 import { accountsExist } from "@/core/auth/users";
 
 import { LoginForm } from "./login-form";
@@ -34,6 +35,16 @@ export default async function LoginPage({
       <Card>
         <LoginForm next={destination} />
       </Card>
+
+      {/*
+        Registration is invitation-only once this account exists, so this leads
+        to a page that will usually explain that rather than to a form. That is
+        still the answer to the question the reader has — the alternative was a
+        page offering one thing to do and no way to ask about anything else.
+      */}
+      <p className="text-sm text-text-muted">
+        招待コードをお持ちですか？ <TextLink href="/register">アカウントを作る</TextLink>
+      </p>
     </main>
   );
 }
