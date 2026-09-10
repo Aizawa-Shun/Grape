@@ -15,6 +15,30 @@ describe("parseEnv", () => {
     expect(parseEnv({ OLLAMA_MODEL: "   " }).OLLAMA_MODEL).toBe("qwen2.5:1.5b-instruct");
   });
 
+  /**
+   * The deployed default. Left to the plain fallback, a Render instance hands
+   * out a snippet pointing at localhost, which fails silently in every visitor's
+   * browser — the one misconfiguration that produces no error anywhere.
+   */
+  it("takes the ingest origin from the host's own public URL when one is offered", () => {
+    const env = parseEnv({ RENDER_EXTERNAL_URL: "https://grape.onrender.com" });
+
+    expect(env.INGEST_BASE_URL).toBe("https://grape.onrender.com");
+  });
+
+  it("lets an explicit ingest origin beat the host's, so a custom domain wins", () => {
+    const env = parseEnv({
+      RENDER_EXTERNAL_URL: "https://grape.onrender.com",
+      INGEST_BASE_URL: "https://grape.example.com",
+    });
+
+    expect(env.INGEST_BASE_URL).toBe("https://grape.example.com");
+  });
+
+  it("still falls back to localhost off a host that offers nothing", () => {
+    expect(parseEnv({}).INGEST_BASE_URL).toBe("http://localhost:3000");
+  });
+
   it("rejects a malformed URL at boot instead of at the first request", () => {
     expect(() => parseEnv({ OLLAMA_BASE_URL: "localhost:11434" })).toThrow(/OLLAMA_BASE_URL/);
   });

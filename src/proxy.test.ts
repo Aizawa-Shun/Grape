@@ -8,10 +8,15 @@ const SECRET = "configured-secret";
 
 function request(
   path: string,
-  { host = "localhost:3000", cookie }: { host?: string; cookie?: string } = {},
+  {
+    host = "localhost:3000",
+    cookie,
+    accept,
+  }: { host?: string; cookie?: string; accept?: string } = {},
 ): NextRequest {
   const headers = new Headers({ host });
   if (cookie) headers.set("cookie", `${SESSION_COOKIE}=${cookie}`);
+  if (accept) headers.set("accept", accept);
   return new NextRequest(`http://${host}${path}`, { headers });
 }
 
@@ -48,6 +53,37 @@ describe("proxy", () => {
     vi.stubEnv("NODE_ENV", "production");
 
     expect(outcome(await proxy(request("/", { host: "grape.example.com" }))).status).toBe(503);
+  });
+
+  /**
+   * A browser cannot show a JSON body, and Next's router answers an
+   * unparseable navigation payload with its own "This page couldn't load" —
+   * which names nothing, and whose only button re-runs the same refusal. The
+   * one message an operator has to be able to read must arrive as a document.
+   */
+  it("tells a browser what to set, as HTML rather than JSON", async () => {
+    vi.stubEnv("GRAPE_SESSION_SECRET", "");
+    vi.stubEnv("NODE_ENV", "production");
+
+    const response = await proxy(
+      request("/", { host: "grape.example.com", accept: "text/html,*/*" }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    expect(await response.text()).toContain("GRAPE_SESSION_SECRET");
+  });
+
+  it("still answers an API caller with JSON", async () => {
+    vi.stubEnv("GRAPE_SESSION_SECRET", "");
+    vi.stubEnv("NODE_ENV", "production");
+
+    const response = await proxy(
+      request("/api/products", { host: "grape.example.com", accept: "text/html,*/*" }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("content-type")).toContain("application/json");
   });
 
   it("refuses even loopback in a production build, where the developer fallback does not apply", async () => {

@@ -72,11 +72,12 @@ services:
       - key: GRAPE_SESSION_SECRET
         generateValue: true
 
-      # Left for the dashboard because the service's own URL is not known until
-      # it first deploys. It is also editable from /settings afterwards without
-      # a restart, since settings live in SQLite.
-      - key: INGEST_BASE_URL
-        sync: false
+      # INGEST_BASE_URL is deliberately absent: Render publishes this service's
+      # own address as RENDER_EXTERNAL_URL, and src/env.ts takes the ingest
+      # origin from it. So the snippet on /settings is correct on the first
+      # boot, with nothing to fill in and no window in which it points at
+      # localhost. Set it here only for a custom domain — or from /settings,
+      # which needs no redeploy because settings live in SQLite.
 
       # Anything but the exact string "false" keeps practice mode on. Stated
       # explicitly rather than left to the default, because this is now a

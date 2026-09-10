@@ -71,16 +71,7 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     !configured && process.env.NODE_ENV !== "production" && isLoopbackHost(request.headers.get("host"));
   const secret = sessionSecret(configured, devMode);
 
-  if (!secret) {
-    return NextResponse.json(
-      {
-        error:
-          "このGrapeは公開URLからアクセスされていますが、セッション鍵が設定されていません。.env に GRAPE_SESSION_SECRET を設定してから、もう一度開いてください。",
-        code: "UNAUTHORIZED",
-      },
-      { status: 503 },
-    );
-  }
+  if (!secret) return unconfigured(request);
 
   const session = await readSession(request.cookies.get(SESSION_COOKIE)?.value, secret);
 
@@ -103,6 +94,45 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     response.cookies.set(SESSION_COOKIE, await issueSession(secret, session.userId), cookieOptions(request));
   }
   return response;
+}
+
+const UNCONFIGURED_MESSAGE =
+  "このGrapeは公開URLからアクセスされていますが、セッション鍵が設定されていません。.env に GRAPE_SESSION_SECRET を設定してから、もう一度開いてください。";
+
+/**
+ * The one refusal an operator has to be able to read.
+ *
+ * A browser navigating to a page cannot show a JSON body: Next's router sees a
+ * payload it cannot parse and falls back to its own "This page couldn't load",
+ * which names nothing and offers only Reload — and reloading returns the same
+ * 503 forever, because every non-public path is refused. So a document request
+ * gets the instruction as HTML, and only an API caller gets JSON.
+ */
+function unconfigured(request: NextRequest): NextResponse {
+  const wantsHtml =
+    !request.nextUrl.pathname.startsWith("/api/") &&
+    (request.headers.get("accept") ?? "").includes("text/html");
+
+  if (!wantsHtml) {
+    return NextResponse.json({ error: UNCONFIGURED_MESSAGE, code: "UNAUTHORIZED" }, { status: 503 });
+  }
+
+  return new NextResponse(
+    `<!doctype html><html lang="ja"><head><meta charset="utf-8">` +
+      `<meta name="viewport" content="width=device-width,initial-scale=1">` +
+      `<title>Grape — 設定が必要です</title>` +
+      `<style>body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:2rem;` +
+      `font:16px/1.7 system-ui,sans-serif;color:#1c1917;background:#faf9f7}` +
+      `main{max-width:34rem}h1{font-size:1.25rem;margin:0 0 .75rem}` +
+      `code{background:#efece8;padding:.15em .4em;border-radius:.25rem;font-size:.9em}` +
+      `pre{background:#1c1917;color:#fafaf9;padding:.85rem 1rem;border-radius:.5rem;overflow-x:auto}</style>` +
+      `</head><body><main><h1>設定が必要です</h1><p>${UNCONFIGURED_MESSAGE}</p>` +
+      `<p>鍵はこれで作れます:</p>` +
+      `<pre>node -e "console.log(crypto.randomUUID())"</pre>` +
+      `<p><code>.env</code> に <code>GRAPE_SESSION_SECRET=…</code> として書き、サーバを再起動してください。</p>` +
+      `</main></body></html>`,
+    { status: 503, headers: { "content-type": "text/html; charset=utf-8" } },
+  );
 }
 
 /**
