@@ -33,10 +33,15 @@ const httpUrl = (fallback: string) =>
     .default(fallback);
 
 const EnvSchema = z.object({
-  DATABASE_URL: z.string().default("file:./grape.db"),
+  // Trimmed: a platform's environment-variable editor pasting in a trailing
+  // newline is a one-character difference from a valid token, and the only
+  // symptom on the other end is Turso answering every query with a flat 401 —
+  // nothing points back at whitespace. See db/connection.ts, which reads these
+  // two the same way for the standalone scripts that bypass this schema.
+  DATABASE_URL: z.string().trim().default("file:./grape.db"),
   // Only libsql:// and https:// remote databases need this — a local file:
   // URL has no server on the other end to authenticate to.
-  DATABASE_AUTH_TOKEN: z.string().optional(),
+  DATABASE_AUTH_TOKEN: z.string().trim().optional(),
 
   // --- Intelligence layer -------------------------------------------------
   LLM_PROVIDER: z.enum(LLM_PROVIDER_NAMES).default("anthropic"),
@@ -123,6 +128,16 @@ const EnvSchema = z.object({
    */
   GRAPE_SESSION_SECRET: z.string().optional(),
 
+  /**
+   * Both optional, and both required together: "Sign in with Google" is a
+   * button that appears when there is somewhere for it to send someone, not a
+   * thing every install must set up. From the OAuth client's own page in
+   * Google Cloud Console; there is no default because a placeholder client id
+   * would silently fail against Google rather than telling anyone to set this.
+   */
+  GOOGLE_CLIENT_ID: z.string().trim().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().trim().optional(),
+
   // --- Operations ---------------------------------------------------------
   GRAPE_LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 
@@ -152,6 +167,18 @@ const CheckedEnvSchema = EnvSchema.superRefine((value, ctx) => {
     code: "custom",
     path: ["OPENAI_API_KEY"],
     message: `required when LLM_PROVIDER=openai-compat and OPENAI_BASE_URL points at ${host}`,
+  });
+}).superRefine((value, ctx) => {
+  // Half a pair is worse than neither half: it would show a "Googleでログイン"
+  // button that fails every attempt with a Google-side "invalid_client",
+  // rather than one that simply does not appear.
+  if (Boolean(value.GOOGLE_CLIENT_ID) === Boolean(value.GOOGLE_CLIENT_SECRET)) return;
+
+  const missing = value.GOOGLE_CLIENT_ID ? "GOOGLE_CLIENT_SECRET" : "GOOGLE_CLIENT_ID";
+  ctx.addIssue({
+    code: "custom",
+    path: [missing],
+    message: "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set together, or not at all",
   });
 });
 

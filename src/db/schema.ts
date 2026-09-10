@@ -70,6 +70,13 @@ export type UserRole = (typeof USER_ROLES)[number];
  * an invite, or `pnpm db:reset-password` on the server.
  *
  * "owner" is the first account to register and the only one that can invite.
+ *
+ * `passwordHash` stays NOT NULL even for a Google-only account: one that has
+ * never set a password gets a hash no scrypt output can ever equal (see
+ * core/auth/google.ts), rather than a nullable column that every password
+ * check would need to remember to guard. `googleId` is nullable and unique —
+ * unique so the same Google account cannot attach to two rows, nullable
+ * because most rows here predate Google sign-in and plenty will never use it.
  */
 export const users = sqliteTable(
   "users",
@@ -78,11 +85,12 @@ export const users = sqliteTable(
     email: text("email").notNull(),
     displayName: text("display_name").notNull(),
     passwordHash: text("password_hash").notNull(),
+    googleId: text("google_id"),
     role: text("role", { enum: USER_ROLES }).notNull().default("member"),
     createdAt: createdAt(),
     lastLoginAt: integer("last_login_at", { mode: "timestamp_ms" }),
   },
-  (t) => [uniqueIndex("users_email_idx").on(t.email)],
+  (t) => [uniqueIndex("users_email_idx").on(t.email), uniqueIndex("users_google_id_idx").on(t.googleId)],
 );
 
 /**

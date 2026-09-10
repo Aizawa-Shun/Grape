@@ -11,7 +11,11 @@
  * up with the same two values.
  */
 export function databaseCredentials(): { url: string; authToken?: string } {
-  const url = process.env.DATABASE_URL ?? "file:./grape.db";
-  const authToken = process.env.DATABASE_AUTH_TOKEN;
+  const url = (process.env.DATABASE_URL ?? "file:./grape.db").trim();
+  // Trimmed: a platform's environment-variable editor pasting in a trailing
+  // newline is a one-character difference from a valid token, and the only
+  // symptom on the other end is Turso answering every query with a flat 401 —
+  // nothing points back at whitespace.
+  const authToken = process.env.DATABASE_AUTH_TOKEN?.trim();
   return authToken ? { url, authToken } : { url };
 }

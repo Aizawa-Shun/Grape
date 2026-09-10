@@ -2,8 +2,10 @@ import { Callout } from "@/components/ui/callout";
 import { Card } from "@/components/ui/card";
 import { GrapeMark } from "@/components/ui/grape-mark";
 import { TextLink } from "@/components/ui/text-link";
+import { googleSignInAvailable } from "@/core/auth/google";
 import { accountsExist } from "@/core/auth/users";
 
+import { GoogleSignInButton } from "../login/google-sign-in-button";
 import { RegisterForm } from "./register-form";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +24,7 @@ export default async function RegisterPage({
 }) {
   const { invite } = await searchParams;
   const first = !(await accountsExist());
+  const showGoogle = googleSignInAvailable();
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col justify-center gap-6 px-4 py-16">
@@ -41,7 +44,30 @@ export default async function RegisterPage({
         </Callout>
       ) : (
         <Card>
-          <RegisterForm first={first} code={invite ?? ""} />
+          <div className="flex flex-col gap-4">
+            <RegisterForm first={first} code={invite ?? ""} />
+            {showGoogle && (
+              <>
+                <div className="flex items-center gap-3 text-xs text-text-muted">
+                  <div className="h-px flex-1 bg-border" />
+                  または
+                  <div className="h-px flex-1 bg-border" />
+                </div>
+                {/*
+                  The invite code (if any) travels the same path a password
+                  registration's does — through /api/auth/google's own
+                  ?invite= into the state cookie — so the Google button on an
+                  invited registration page honors the same code the form
+                  above does.
+                */}
+                <GoogleSignInButton
+                  next="/"
+                  invite={invite}
+                  label={first ? "Googleで始める" : "Googleで登録"}
+                />
+              </>
+            )}
+          </div>
         </Card>
       )}
 

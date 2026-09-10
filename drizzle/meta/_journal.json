@@ -43,6 +43,13 @@
       "when": 1788965171558,
       "tag": "0005_rich_hemingway",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1789040431609,
+      "tag": "0006_nasty_thunderbolt",
+      "breakpoints": true
     }
   ]
 }

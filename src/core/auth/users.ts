@@ -4,7 +4,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { MIN_PASSWORD_LENGTH } from "@/core/auth/policy";
 import { AppError } from "@/core/errors";
 import { db, schema, type Database } from "@/db/client";
-import { hashPassword, verifyPassword } from "@/server/auth/password";
+import { NO_PASSWORD_LOGIN, hashPassword, verifyPassword } from "@/server/auth/password";
 
 /**
  * Membership: the first person to arrive owns the instance, and everyone
@@ -96,18 +96,28 @@ function validate(input: NewAccount): { email: string; displayName: string } {
  * wrapper, and unwrapping that is knowledge about this insert, not about
  * routing.
  */
-function isDuplicateEmail(error: unknown): boolean {
+function isUniqueViolation(error: unknown, column: string): boolean {
   for (let cause: unknown = error, depth = 0; cause && depth < 5; depth++) {
     const message = String((cause as { message?: unknown }).message ?? "");
-    if (/UNIQUE constraint failed: users.email/i.test(message)) return true;
+    if (new RegExp(`UNIQUE constraint failed: users.${column}`, "i").test(message)) return true;
     cause = (cause as { cause?: unknown }).cause;
   }
   return false;
 }
 
+function isDuplicateEmail(error: unknown): boolean {
+  return isUniqueViolation(error, "email");
+}
+
 async function insertUser(
   tx: Queryable,
-  values: { email: string; displayName: string; passwordHash: string; role: "owner" | "member" },
+  values: {
+    email: string;
+    displayName: string;
+    passwordHash: string;
+    role: "owner" | "member";
+    googleId?: string;
+  },
 ): Promise<User> {
   try {
     const [user] = await tx.insert(schema.users).values(values).returning();
@@ -116,6 +126,14 @@ async function insertUser(
     if (isDuplicateEmail(error)) {
       throw new AppError("CONFLICT", "e-mail already registered", {
         hint: "そのメールアドレスはすでに登録されています。",
+      });
+    }
+    // Reachable only if the same Google account starts two sign-ins at once —
+    // signInWithGoogle already looked for this googleId and found nothing, so
+    // this is the other request winning the race, not a stale check.
+    if (values.googleId && isUniqueViolation(error, "google_id")) {
+      throw new AppError("CONFLICT", "Google account already linked", {
+        hint: "このGoogleアカウントはすでに使われています。もう一度お試しください。",
       });
     }
     throw error;
@@ -330,6 +348,56 @@ export async function listInvites(
   }));
 }
 
+const INVITE_INVALID = {
+  hint: "この招待リンクは使えません。招待した人に新しいものを発行してもらってください。",
+} as const;
+
+/**
+ * The half of redemption that only reads: finds a still-open invite, or
+ * throws the one message that covers unknown, expired and already-used alike
+ * (see InviteState above for why they are not told apart).
+ *
+ * Split out from `redeemInvite` so `signInWithGoogle` can share it — a code
+ * that unlocks a password account must unlock a Google one on the same terms,
+ * not a second, drifted copy of what "still open" means.
+ */
+export async function findOpenInvite(
+  tx: Queryable,
+  code: string,
+  now: Date,
+): Promise<typeof schema.invites.$inferSelect> {
+  const invite = await tx.query.invites.findFirst({
+    where: and(eq(schema.invites.codeHash, hashCode(code)), isNull(schema.invites.usedAt)),
+  });
+
+  if (!invite || invite.expiresAt.getTime() <= now.getTime()) {
+    throw new AppError("UNAUTHORIZED", "Invite is unknown, expired or already used", INVITE_INVALID);
+  }
+  return invite;
+}
+
+/**
+ * The half that writes, conditioned on the invite still being unused so two
+ * people submitting the same code at once cannot both get past it — the
+ * second update matches no row and throws.
+ */
+export async function consumeInvite(
+  tx: Queryable,
+  inviteId: string,
+  userId: string,
+  now: Date,
+): Promise<void> {
+  const marked = await tx
+    .update(schema.invites)
+    .set({ usedAt: now, usedBy: userId })
+    .where(and(eq(schema.invites.id, inviteId), isNull(schema.invites.usedAt)))
+    .returning();
+
+  if (marked.length === 0) {
+    throw new AppError("UNAUTHORIZED", "Invite was redeemed concurrently", INVITE_INVALID);
+  }
+}
+
 export async function redeemInvite(
   code: string,
   input: NewAccount,
@@ -338,35 +406,102 @@ export async function redeemInvite(
 ): Promise<User> {
   const { email, displayName } = validate(input);
   const passwordHash = await hashPassword(input.password);
-  const codeHash = hashCode(code);
 
   return database.transaction(async (tx) => {
-    const invite = await tx.query.invites.findFirst({
-      where: and(eq(schema.invites.codeHash, codeHash), isNull(schema.invites.usedAt)),
-    });
-
-    if (!invite || invite.expiresAt.getTime() <= now.getTime()) {
-      throw new AppError("UNAUTHORIZED", "Invite is unknown, expired or already used", {
-        hint: "この招待リンクは使えません。招待した人に新しいものを発行してもらってください。",
-      });
-    }
-
+    const invite = await findOpenInvite(tx, code, now);
     const user = await insertUser(tx, { email, displayName, passwordHash, role: "member" });
+    await consumeInvite(tx, invite.id, user.id, now);
+    return user;
+  });
+}
 
-    // Conditioned on still being unused, so two people submitting the same
-    // code at once cannot both get past it — the second update matches no row.
-    const marked = await tx
-      .update(schema.invites)
-      .set({ usedAt: now, usedBy: user.id })
-      .where(and(eq(schema.invites.id, invite.id), isNull(schema.invites.usedAt)))
-      .returning();
+// --- Google sign-in ----------------------------------------------------------
 
-    if (marked.length === 0) {
-      throw new AppError("UNAUTHORIZED", "Invite was redeemed concurrently", {
-        hint: "この招待リンクは使えません。招待した人に新しいものを発行してもらってください。",
-      });
+export interface GoogleIdentity {
+  googleId: string;
+  email: string;
+  displayName: string;
+}
+
+/**
+ * Arriving from Google reaches the same account rules password sign-in does —
+ * one owner first, an invite for anyone after — through a different door.
+ *
+ * Three outcomes, tried in order:
+ *
+ *  1. This Google account has signed in before (`googleId` matches): return
+ *     that row. The common case after the first time.
+ *  2. It has not, but its e-mail matches a row created by password
+ *     registration: link `googleId` onto it and return it. Google has just
+ *     vouched for that address (see core/auth/google.ts's email_verified
+ *     check), so this is the same address, not merely a similar one — and
+ *     without linking, an owner who registered with a password could never
+ *     use "Sign in with Google" for the account they already have.
+ *  3. Neither matches: a new account, exactly like registerFirstUser or
+ *     redeemInvite — the first ever gets ownership, everyone after needs the
+ *     same invite code this identity was handed.
+ *
+ * `passwordHash` gets NO_PASSWORD_LOGIN in the third case: this row's identity
+ * is Google's session, not a password Grape ever hashed, and a value no
+ * scrypt output can equal keeps the password-reset script and the login route
+ * from needing to know accounts can lack a password at all.
+ */
+export async function signInWithGoogle(
+  identity: GoogleIdentity,
+  inviteCode: string | undefined,
+  database: Database = db,
+  now: Date = new Date(),
+): Promise<User> {
+  const email = normalizeEmail(identity.email);
+  const displayName = identity.displayName.trim() || email;
+
+  return database.transaction(async (tx) => {
+    const byGoogleId = await tx.query.users.findFirst({
+      where: eq(schema.users.googleId, identity.googleId),
+    });
+    if (byGoogleId) return byGoogleId;
+
+    const byEmail = await tx.query.users.findFirst({ where: eq(schema.users.email, email) });
+    if (byEmail) {
+      const [linked] = await tx
+        .update(schema.users)
+        .set({ googleId: identity.googleId })
+        .where(eq(schema.users.id, byEmail.id))
+        .returning();
+      return linked;
     }
 
+    if (!(await accountsExist(tx))) {
+      const user = await insertUser(tx, {
+        email,
+        displayName,
+        passwordHash: NO_PASSWORD_LOGIN,
+        googleId: identity.googleId,
+        role: "owner",
+      });
+      await adoptPreAccountRows(tx, user.id);
+      return user;
+    }
+
+    if (!inviteCode) {
+      throw new AppError(
+        "UNAUTHORIZED",
+        "No invite and no existing account for this Google identity",
+        {
+          hint: "このGrapeへの参加には招待リンクが必要です。オーナーに発行してもらってください。",
+        },
+      );
+    }
+
+    const invite = await findOpenInvite(tx, inviteCode, now);
+    const user = await insertUser(tx, {
+      email,
+      displayName,
+      passwordHash: NO_PASSWORD_LOGIN,
+      googleId: identity.googleId,
+      role: "member",
+    });
+    await consumeInvite(tx, invite.id, user.id, now);
     return user;
   });
 }

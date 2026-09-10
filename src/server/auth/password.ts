@@ -95,3 +95,18 @@ export async function verifyDummy(password: string): Promise<false> {
   await verifyPassword(password, DUMMY_HASH);
   return false;
 }
+
+/**
+ * `passwordHash` is NOT NULL, but not every account has a password: the
+ * loopback developer account and a Google-only sign-in both need a row with
+ * no password anyone can present. This is deliberately not a valid `scrypt$…`
+ * string — `parse()` above rejects it outright, so `verifyPassword` returns
+ * `false` for every candidate without ever deriving one, the same way an
+ * unparseable stored hash always has.
+ */
+export const NO_PASSWORD_LOGIN = "no-password-login";
+
+/** Whether this account has a password at all — false for a Google-only sign-in or the loopback developer account. */
+export function hasPassword(passwordHash: string): boolean {
+  return passwordHash !== NO_PASSWORD_LOGIN;
+}

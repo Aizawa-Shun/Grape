@@ -14,6 +14,7 @@ import {
   listInvites,
   redeemInvite,
   registerFirstUser,
+  signInWithGoogle,
   updateProfile,
 } from "./users";
 import { verifyPassword } from "@/server/auth/password";
@@ -209,6 +210,82 @@ describe("invites", () => {
 
     const found = await db.query.users.findFirst({ where: eq(schema.users.email, GUEST.email) });
     expect(found).toBeUndefined();
+  });
+});
+
+describe("signInWithGoogle", () => {
+  const GOOGLE = { googleId: "google-sub-1", email: "founder@example.com", displayName: "Founder" };
+
+  it("makes the first Google sign-in the owner, same as password registration", async () => {
+    const db = await testDb();
+    const user = await signInWithGoogle(GOOGLE, undefined, db);
+
+    expect(user.role).toBe("owner");
+    expect(user.googleId).toBe(GOOGLE.googleId);
+    expect(await accountsExist(db)).toBe(true);
+  });
+
+  it("returns the same row on a later sign-in by the same Google account", async () => {
+    const db = await testDb();
+    const first = await signInWithGoogle(GOOGLE, undefined, db);
+    const second = await signInWithGoogle(GOOGLE, undefined, db);
+
+    expect(second.id).toBe(first.id);
+  });
+
+  it("refuses a second identity with no invite and no matching account", async () => {
+    const db = await testDb();
+    await signInWithGoogle(GOOGLE, undefined, db);
+
+    await expect(
+      signInWithGoogle({ ...GOOGLE, googleId: "google-sub-2", email: "other@example.com" }, undefined, db),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("lets a code from the owner add a Google-identified member, same as redeemInvite", async () => {
+    const db = await testDb();
+    const owner = await signInWithGoogle(GOOGLE, undefined, db);
+    const { code } = await createInvite(owner.id, db);
+
+    const member = await signInWithGoogle(
+      { googleId: "google-sub-2", email: "guest@example.com", displayName: "Guest" },
+      code,
+      db,
+    );
+    expect(member.role).toBe("member");
+  });
+
+  /**
+   * The case the whole design turns on: someone who registered with a
+   * password, later choosing "Sign in with Google" for the same address,
+   * ends up back in the one account they already had rather than a second
+   * one Grape cannot tell apart from it.
+   */
+  it("links a Google identity onto an existing password account with the same address, rather than creating a second one", async () => {
+    const db = await testDb();
+    const owner = await registerFirstUser(ACCOUNT, db);
+
+    const linked = await signInWithGoogle(
+      { googleId: "google-sub-1", email: ACCOUNT.email, displayName: "Owner" },
+      undefined,
+      db,
+    );
+
+    expect(linked.id).toBe(owner.id);
+    expect(linked.googleId).toBe("google-sub-1");
+    expect(await db.select().from(schema.users)).toHaveLength(1);
+
+    // And the password that account was created with still works — linking
+    // must not disturb it.
+    const row = await db.query.users.findFirst({ where: eq(schema.users.id, owner.id) });
+    expect(await verifyPassword(ACCOUNT.password, row!.passwordHash)).toBe(true);
+  });
+
+  it("gives a Google-only account a password hash nothing can ever verify against", async () => {
+    const db = await testDb();
+    const user = await signInWithGoogle(GOOGLE, undefined, db);
+
+    expect(await verifyPassword("anything at all", user.passwordHash)).toBe(false);
   });
 });
 

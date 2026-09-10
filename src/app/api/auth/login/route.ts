@@ -4,11 +4,11 @@ import { z } from "zod";
 
 import { cookieOptions } from "@/proxy";
 import { db, schema } from "@/db/client";
-import { env } from "@/env";
 import { verifyDummy, verifyPassword } from "@/server/auth/password";
 import { log } from "@/server/log";
 import { clientAddress, takeToken } from "@/server/rate-limit";
-import { SESSION_COOKIE, isLoopbackHost, issueSession, sessionSecret } from "@/server/session";
+import { secretFor } from "@/server/auth/current-user";
+import { SESSION_COOKIE, issueSession } from "@/server/session";
 
 export const runtime = "nodejs";
 
@@ -34,11 +34,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const devMode =
-    !env.GRAPE_SESSION_SECRET &&
-    process.env.NODE_ENV !== "production" &&
-    isLoopbackHost(request.headers.get("host"));
-  const secret = sessionSecret(env.GRAPE_SESSION_SECRET, devMode);
+  const secret = secretFor(request.headers.get("host"));
 
   if (!secret) {
     return NextResponse.json(

@@ -28,6 +28,31 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 /**
+ * The class string alone, for the one caller that cannot be a `<button>`:
+ * "Sign in with Google" is a plain top-level navigation to /api/auth/google,
+ * which a client-side click handler cannot replace — the browser has to
+ * actually leave the page and follow Google's redirect chain. An `<a>` styled
+ * to match is simpler than teaching Button to render as one.
+ */
+export function buttonClassName(
+  variant: Variant = "secondary",
+  size: Size = "md",
+  className?: string,
+): string {
+  return cx(
+    // `active:scale` is the one purely cosmetic addition here — a button
+    // that only changes colour on press reads as flat under a cursor
+    // that is visibly pushing it. Every other change on this line
+    // (colour, border, shadow) was already conditional on some state.
+    "inline-flex items-center justify-center rounded-md transition-[color,background-color,border-color,box-shadow,opacity,scale] duration-150 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100",
+    VARIANTS[variant],
+    SIZES[size],
+    focusRing,
+    className,
+  );
+}
+
+/**
  * Replaces five hand-copied button class strings that had drifted into three
  * different paddings. `loading` exists so that "disabled + aria-busy + a
  * spinner" cannot be half-implemented at one call site — every long action in
@@ -48,17 +73,7 @@ export function Button({
       {...rest}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
-      className={cx(
-        // `active:scale` is the one purely cosmetic addition here — a button
-        // that only changes colour on press reads as flat under a cursor
-        // that is visibly pushing it. Every other change on this line
-        // (colour, border, shadow) was already conditional on some state.
-        "inline-flex items-center justify-center rounded-md transition-[color,background-color,border-color,box-shadow,opacity,scale] duration-150 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100",
-        VARIANTS[variant],
-        SIZES[size],
-        focusRing,
-        className,
-      )}
+      className={buttonClassName(variant, size, className)}
     >
       {loading && <Spinner />}
       {children}

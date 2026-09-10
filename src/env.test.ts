@@ -70,4 +70,28 @@ describe("parseEnv", () => {
   it("does not require ANTHROPIC_API_KEY, since `ant auth login` is invisible to env", () => {
     expect(() => parseEnv({ LLM_PROVIDER: "anthropic" })).not.toThrow();
   });
+
+  it("allows neither GOOGLE_CLIENT_ID nor GOOGLE_CLIENT_SECRET, the ordinary no-Google-login case", () => {
+    expect(() => parseEnv({})).not.toThrow();
+  });
+
+  it("allows both together, which is what turns Google sign-in on", () => {
+    const env = parseEnv({ GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" });
+    expect(env.GOOGLE_CLIENT_ID).toBe("id");
+  });
+
+  /**
+   * Half a pair would show a "Googleでログイン" button that fails every
+   * attempt against Google with "invalid_client" — worse than one that never
+   * appears, since the operator sees nothing wrong until someone clicks it.
+   */
+  it.each(["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"])("refuses %s alone", (onlyThis) => {
+    expect(() => parseEnv({ [onlyThis]: "only-one-half" })).toThrow(/GOOGLE_CLIENT/);
+  });
+
+  it("trims whitespace pasted around DATABASE_AUTH_TOKEN and DATABASE_URL", () => {
+    const env = parseEnv({ DATABASE_URL: " file:./grape.db \n", DATABASE_AUTH_TOKEN: " a-token\n" });
+    expect(env.DATABASE_URL).toBe("file:./grape.db");
+    expect(env.DATABASE_AUTH_TOKEN).toBe("a-token");
+  });
 });

@@ -1,6 +1,7 @@
 import { Card } from "@/components/ui/card";
 import { Page, PageHeader, Section } from "@/components/ui/page";
 import { requireUser } from "@/server/auth/current-user";
+import { hasPassword } from "@/server/auth/password";
 
 import { PasswordForm, ProfileForm } from "./account-form";
 
@@ -39,14 +40,25 @@ export default async function AccountPage() {
         </Card>
       </Section>
 
-      <Section
-        title="パスワード"
-        description="変えるには、いま使っているパスワードが要ります。"
-      >
-        <Card>
-          <PasswordForm />
-        </Card>
-      </Section>
+      {hasPassword(user.passwordHash) ? (
+        <Section title="パスワード" description="変えるには、いま使っているパスワードが要ります。">
+          <Card>
+            <PasswordForm />
+          </Card>
+        </Section>
+      ) : (
+        // A password-changing form for an account with no password would ask
+        // for a "current password" that verifies against nothing — every
+        // attempt fails with a message that explains nothing, since the
+        // account really has no password to get right.
+        <Section title="パスワード">
+          <Card>
+            <p className="text-sm text-text-muted">
+              Googleアカウントでログインしています。パスワードは設定されていません。
+            </p>
+          </Card>
+        </Section>
+      )}
     </Page>
   );
 }

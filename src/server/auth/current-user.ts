@@ -8,6 +8,7 @@ import { AppError } from "@/core/errors";
 import { db, schema } from "@/db/client";
 import { currentUserId } from "@/server/context";
 import { env } from "@/env";
+import { NO_PASSWORD_LOGIN } from "@/server/auth/password";
 import { DEV_USER_ID, SESSION_COOKIE, isLoopbackHost, readSession, sessionSecret } from "@/server/session";
 
 export type User = typeof schema.users.$inferSelect;
@@ -22,7 +23,13 @@ export type User = typeof schema.users.$inferSelect;
  * about who is logged in.
  */
 
-function secretFor(host: string | null | undefined): string | null {
+/**
+ * Exported for the three route handlers (login, register, the Google OAuth
+ * callback) that issue a session outside of `currentUser`'s cache and so need
+ * to answer this same question for themselves rather than duplicating the
+ * dev-fallback rule a third time.
+ */
+export function secretFor(host: string | null | undefined): string | null {
   const devMode =
     !env.GRAPE_SESSION_SECRET &&
     process.env.NODE_ENV !== "production" &&
@@ -143,7 +150,7 @@ async function createDeveloperAccount(): Promise<User> {
       id: DEV_USER_ID,
       email: "dev@localhost",
       displayName: "開発",
-      passwordHash: "no-password-login",
+      passwordHash: NO_PASSWORD_LOGIN,
       role: "owner",
     })
     .onConflictDoNothing();
