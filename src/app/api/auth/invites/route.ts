@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { createInvite, listInvites } from "@/core/auth/users";
 import { AppError } from "@/core/errors";
-import { requireUser } from "@/server/auth/current-user";
+import { requireApiUser } from "@/server/auth/current-user";
 import { route } from "@/server/http/route";
 
 export const runtime = "nodejs";
@@ -17,7 +17,7 @@ export const runtime = "nodejs";
  * sender, so delivery is the owner's to arrange; the row keeps only a hash.
  */
 async function requireOwner() {
-  const user = await requireUser();
+  const user = await requireApiUser();
   if (user.role !== "owner") {
     throw new AppError("UNAUTHORIZED", "Only the owner may invite", {
       hint: "招待を発行できるのはオーナーだけです。",

@@ -1,4 +1,5 @@
 import { cookies, headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { cache } from "react";
 import { eq } from "drizzle-orm";
 
@@ -92,11 +93,38 @@ export function requireUserId(): string {
   return userId;
 }
 
+/**
+ * For server components. Sends the reader to /login rather than throwing.
+ *
+ * This used to throw, on the reasoning that the proxy had already redirected
+ * anonymous page requests and so a page reaching here meant the two disagreed.
+ * They can disagree legitimately, and this is how: the proxy verifies the
+ * cookie's signature at the Edge and deliberately reads no database, so a
+ * session naming an account that no longer exists passes it and arrives here
+ * with nothing to load. Restore a backup, recreate the database, remove a
+ * member — or just hold a cookie from a different instance on the same host,
+ * since cookies are scoped to a host and ignore the port — and every page
+ * answered 500, twice, with a reload sending the same cookie again. There was
+ * no way out of it from inside the browser.
+ *
+ * A stale session is a signed-out reader, so it gets the sign-in page. The
+ * cookie is not cleared here — a render may not set one — but nothing needs it
+ * to be: /login is public, renders fine with the dead cookie still attached,
+ * and signing in overwrites it.
+ */
 export async function requireUser(): Promise<User> {
   const user = await currentUser();
-  // The proxy has already redirected anonymous page requests to /login, so
-  // reaching here without a session means the two disagree — an error, not a
-  // sign-in prompt.
+  if (!user) redirect("/login");
+  return user;
+}
+
+/**
+ * The same check for route handlers, which answer a `fetch` rather than a
+ * person: a 307 to an HTML sign-in page is not something the caller can use,
+ * so this keeps the error and the 401 that comes with it.
+ */
+export async function requireApiUser(): Promise<User> {
+  const user = await currentUser();
   if (!user) throw new AppError("UNAUTHORIZED", "No session on a route that requires one");
   return user;
 }
