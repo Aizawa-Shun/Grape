@@ -8,6 +8,19 @@ import * as schema from "./schema";
 export type Database = LibSQLDatabase<typeof schema>;
 
 /**
+ * This module is server-only. Importing it from a `"use client"` file drags
+ * @libsql/client into the browser bundle, where the web build rejects the
+ * file: URL of a local database and the failure surfaces as a chunk that will
+ * not evaluate — every page it is bundled with goes blank. Fail here instead,
+ * naming the actual mistake.
+ */
+if (typeof window !== "undefined") {
+  throw new Error(
+    "@/db/client was imported into the browser bundle. Move the value a client component needs into a module that does not reach the database.",
+  );
+}
+
+/**
  * Next's dev server re-evaluates modules on every hot reload. Without a cache
  * on globalThis that leaks a new libsql connection per edit until the process
  * runs out of file handles.

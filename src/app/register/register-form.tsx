@@ -6,7 +6,7 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, controlClass } from "@/components/ui/field";
 import { Status } from "@/components/ui/status";
-import { MIN_PASSWORD_LENGTH } from "@/core/auth/users";
+import { MIN_PASSWORD_LENGTH } from "@/core/auth/policy";
 
 export function RegisterForm({ first, code }: { first: boolean; code: string }) {
   const router = useRouter();

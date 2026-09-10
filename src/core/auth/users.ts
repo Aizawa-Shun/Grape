@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { and, eq, isNull, sql } from "drizzle-orm";
 
+import { MIN_PASSWORD_LENGTH } from "@/core/auth/policy";
 import { AppError } from "@/core/errors";
 import { db, schema, type Database } from "@/db/client";
 import { hashPassword } from "@/server/auth/password";
@@ -20,14 +21,7 @@ import { hashPassword } from "@/server/auth/password";
  * actual work.
  */
 
-/**
- * Long rather than complicated. Composition rules push people towards
- * predictable substitutions; length is the thing that actually costs an
- * attacker something, and this is typed once and then kept in a password
- * manager. The owner's password guards every service on the instance and the
- * button that spends money, so it is not the place to be accommodating.
- */
-export const MIN_PASSWORD_LENGTH = 12;
+export { MIN_PASSWORD_LENGTH };
 
 export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
