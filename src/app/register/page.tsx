@@ -46,17 +46,18 @@ export default async function RegisterPage({
       )}
 
       {/*
-        Offered whenever there is an account to log into, which is exactly when
-        `first` is false — including alongside the invitation form, where the
-        reader may already have an account and have followed the link anyway.
-        Deliberately absent on a fresh instance: /login redirects back here
-        while nobody has registered, so the link would only be a loop.
+        Offered unconditionally, including on a fresh instance. It was left off
+        there while /login redirected back to this page whenever nobody had
+        registered, which made the link a loop; /login now answers for itself
+        instead, so the choice is a real one in both directions.
+
+        On a fresh instance it leads to a page saying there is nobody to sign
+        in as yet — which is the honest answer to "can I log in instead?", and
+        a better one than an option that is simply missing.
       */}
-      {!first && (
-        <p className="text-sm text-text-muted">
-          すでにアカウントをお持ちですか？ <TextLink href="/login">ログイン</TextLink>
-        </p>
-      )}
+      <p className="text-sm text-text-muted">
+        すでにアカウントをお持ちですか？ <TextLink href="/login">ログイン</TextLink>
+      </p>
     </main>
   );
 }
