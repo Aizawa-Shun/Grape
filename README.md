@@ -62,18 +62,29 @@ pnpm tunnel               # https://....trycloudflare.com が表示されます
 トンネルは開き直すたびにアドレスが変わり、パソコンを閉じれば止まります。
 常時動かすなら Render に置きます。`render.yaml` がそのための設定です。
 
-**なぜ Render か。** 永続ディスクがあるので `grape.db` がファイルのまま残ります。
-データ層を1行も書き換えずに済むのは、この選択肢だけです。
+**データベースは Turso です。** Render 自体のディスクは有料で、しかもサービスを
+作り直すと消えます。Turso は無料枠があり、ドライバも今と同じ `@libsql/client` な
+ので、データ層は書き換えません。Render の無料プランがそのまま使えます。
 
-1. GitHub（または GitLab）にリポジトリを作って push する
-2. Render で **New → Blueprint** を選び、そのリポジトリを指定する
-3. 訊かれる値を入れる
+1. [turso.tech](https://turso.tech) でアカウントを作り（GitHubログイン可）、
+   データベースをひとつ作る
+2. その接続情報を控える
+   ```bash
+   turso db show <データベース名>          # → DATABASE_URL（libsql://...）
+   turso db tokens create <データベース名>  # → DATABASE_AUTH_TOKEN
+   ```
+   CLIが無ければ、ダッシュボードの Connect 画面からも同じ2つの値が見られます。
+3. GitHub（または GitLab）にリポジトリを作って push する
+4. Render で **New → Blueprint** を選び、そのリポジトリを指定する
+5. 訊かれる値を入れる
    - `ANTHROPIC_API_KEY` — サーバーでは `ant auth login` が使えないので必須です
+   - `DATABASE_URL` — 手順2の `libsql://...`
+   - `DATABASE_AUTH_TOKEN` — 手順2のトークン
    - `GRAPE_SESSION_SECRET` — **必須**。これが無いと、公開URLからは全部503になります
      （Renderが自動生成するので、そのままで構いません）
-4. 初回デプロイ後、割り当てられた `https://....onrender.com` を開いて、
+6. 初回デプロイ後、割り当てられた `https://....onrender.com` を開いて、
    **最初のアカウントを作る**（先に開いた人がオーナーになります）
-5. `/settings` の「計測用のコード」をコピーして、自分のサイトに貼る
+7. `/settings` の「計測用のコード」をコピーして、自分のサイトに貼る
 
 「訪問データの受け取り先」を入力する必要はありません。Render は自分の公開URLを
 `RENDER_EXTERNAL_URL` として渡してくるので、Grape はそれを既定の受け取り先に
@@ -104,8 +115,10 @@ pnpm tunnel               # https://....trycloudflare.com が表示されます
 pnpm db:reset-password you@example.com '新しいパスワード'
 ```
 
-無料プランには永続ディスクが無く、放置すると停止するため、有料インスタンスが要ります。
-`render.yaml` は `1c-2g` を指定していますが、`0.5c-512mb` でも動きます。
+`render.yaml` は無料プランを指定しています。データベースが Render の外（Turso）
+にあるので、放置してインスタンスが止まっても、次のアクセスで起き直すだけでデータは
+消えません。ただし放置後の最初のアクセスは、起き直す分だけ数秒〜十数秒遅くなります。
+待たせたくない場合は Render のプランを有料に上げてください。
 
 > **AIの接続先は `anthropic` になります。** Ollama はあなたのパソコンで動くもので、
 > Render 上には存在しません。ローカルで Ollama を使っていた場合、

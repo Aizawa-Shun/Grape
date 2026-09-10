@@ -85,3 +85,30 @@ export function describeMigrationStatus(status: MigrationStatus): string {
       return "applied migrations do not match the ones in drizzle/ — restore a backup or recreate the database";
   }
 }
+
+/**
+ * The line a deploy log needs when a database turns out to be empty.
+ *
+ * Creating the schema from nothing is correct exactly once — on a first
+ * deploy. Every time after that it means the previous file is gone, and the
+ * only symptom anyone sees is that their account no longer exists and
+ * registration has re-opened. That is a silent, total data loss, and the fact
+ * that it is indistinguishable from a first run is precisely why it has to be
+ * said out loud on both.
+ *
+ * Returns null when the database already had migrations applied, which is the
+ * ordinary case and needs no comment.
+ */
+export function freshDatabaseWarning(before: MigrationStatus, databaseUrl: string): string | null {
+  if (before.ok || before.reason !== "never_migrated") return null;
+
+  return [
+    `The database at ${databaseUrl} was empty, so the schema has just been created.`,
+    "If this is the first deploy, that is expected and there is nothing to do.",
+    "If it is not, the previous database is gone: whatever this path points at does",
+    "not survive a restart. On Render that means the file is in the container",
+    "filesystem rather than on a mounted disk — check that the service has a disk",
+    "and that DATABASE_URL points inside its mount path (the blueprint uses",
+    "/var/data, so file:/var/data/grape.db).",
+  ].join(" ");
+}

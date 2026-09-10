@@ -4,6 +4,8 @@ import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
 
+import { databaseCredentials } from "./connection";
+import { freshDatabaseWarning, migrationStatus, readJournal } from "./migration-status";
 import { applyPragmas } from "./pragmas";
 
 /**
@@ -17,14 +19,23 @@ import { applyPragmas } from "./pragmas";
  * CommonJS and a top-level await fails with ERR_REQUIRE_ASYNC_MODULE.
  */
 async function main(): Promise<void> {
-  const url = process.env.DATABASE_URL ?? "file:./grape.db";
-  const client = createClient({ url });
+  const { url } = databaseCredentials();
+  const client = createClient(databaseCredentials());
   try {
     // Same settings the app runs under, so a migration cannot succeed here
     // under looser rules than the ones its data will live by.
     await applyPragmas(client);
+
+    // Read before migrating, because after it there is no longer any
+    // difference between a database that has been here all along and one this
+    // command just invented.
+    const before = await migrationStatus(client, await readJournal());
+
     await migrate(drizzle(client), { migrationsFolder: "./drizzle" });
     console.log(`Migrations applied to ${url}`);
+
+    const warning = freshDatabaseWarning(before, url);
+    if (warning) console.warn(`[grape] ${warning}`);
   } finally {
     client.close();
   }

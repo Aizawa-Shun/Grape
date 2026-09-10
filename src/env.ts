@@ -34,6 +34,9 @@ const httpUrl = (fallback: string) =>
 
 const EnvSchema = z.object({
   DATABASE_URL: z.string().default("file:./grape.db"),
+  // Only libsql:// and https:// remote databases need this — a local file:
+  // URL has no server on the other end to authenticate to.
+  DATABASE_AUTH_TOKEN: z.string().optional(),
 
   // --- Intelligence layer -------------------------------------------------
   LLM_PROVIDER: z.enum(LLM_PROVIDER_NAMES).default("anthropic"),

@@ -8,5 +8,9 @@ export default defineConfig({
   schema: "./src/db/schema.ts",
   out: "./drizzle",
   dialect: "sqlite",
+  // `dbCredentials` is unused in practice — see the note above, `generate`
+  // never opens this URL — and its sqlite type has no `authToken` field to
+  // give it even if it did. src/db/migrate.ts is the one that actually
+  // connects, through databaseCredentials(), which does carry the token.
   dbCredentials: { url: process.env.DATABASE_URL ?? "file:./grape.db" },
 });

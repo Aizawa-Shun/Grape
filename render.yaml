@@ -1,12 +1,15 @@
 # Render Blueprint — https://render.com/docs/blueprint-spec
 #
-# One web service with a persistent disk, which is the whole reason Render was
-# chosen over the alternatives: grape.db stays an ordinary SQLite file, so the
-# 51 database call sites, the 8 cascade deletes and the migration history that
-# /api/health verifies all keep working untouched.
+# The database is Turso (libsql:// over the network) rather than a disk on
+# this service. Render's own disks cost money and, being local to one
+# instance, still lose everything if the service is ever recreated instead of
+# redeployed; Turso has a free tier and the same `@libsql/client` driver
+# already in use, so this changes only two environment variables below, not
+# the 51 database call sites, the 8 cascade deletes, or the migration history
+# that /api/health verifies.
 #
-# One thing is deliberately NOT set here and must be filled in on Render:
-# ANTHROPIC_API_KEY (see `sync: false` below).
+# Two things are deliberately NOT set here and must be filled in on Render:
+# ANTHROPIC_API_KEY and DATABASE_AUTH_TOKEN (see `sync: false` below).
 
 services:
   - type: web
@@ -14,22 +17,25 @@ services:
     runtime: node
     region: singapore
 
-    # A disk cannot be attached to a free instance, and a free instance also
-    # spins down when idle — which would defeat the scheduled loop this move
-    # exists to enable. 0.5c-512mb is the cheaper option if 2 GB is more than
-    # this needs; a Next build is the memory-hungry part, and that runs on
-    # Render's build machine rather than here.
-    plan: 1c-2g
+    # Free is viable now that the database is not on this instance's own disk:
+    # a free instance spins down when idle and loses its container filesystem
+    # on every restart, which used to take grape.db with it. Turso is outside
+    # that filesystem, so restarts and spin-downs no longer lose data — the
+    # cost of free is only that a spun-down instance's scheduled loop and any
+    # request both wait for a cold start.
+    plan: free
 
     # --prod=false because `pnpm db:migrate` runs tsx, and tsx is a
     # devDependency. A production-only install would leave the start command
     # with no way to apply migrations.
     buildCommand: pnpm install --frozen-lockfile --prod=false && pnpm build
 
-    # Migrations run here rather than in buildCommand or preDeployCommand
-    # because those run on machines where this service's disk is not mounted —
-    # and the database lives on the disk. drizzle's migrator records what it
-    # has applied, so running on every boot is a no-op after the first.
+    # Migrations run here rather than in buildCommand or preDeployCommand:
+    # those ran on a machine that could not reach the disk back when the
+    # database was local, and now that it is Turso there is no reason to move
+    # this off the one place already proven to work. drizzle's migrator
+    # records what it has applied, so running on every boot is a no-op after
+    # the first.
     startCommand: pnpm db:migrate && pnpm start
 
     # Public, and cheap for an unauthenticated caller: with no session cookie
@@ -37,19 +43,23 @@ services:
     # A health check that woke the LLM every minute would bill for uptime.
     healthCheckPath: /api/health
 
-    disk:
-      name: grape-data
-      mountPath: /var/data
-      sizeGB: 1
-
     envVars:
       - key: NODE_VERSION
         value: "22"
 
-      # On the disk, not in the container filesystem, which is replaced on
-      # every deploy.
+      # A libsql://…-turso.io URL from `turso db show <name>`. Not the
+      # file:/var/data/grape.db this used to be — that path lived on the disk
+      # this blueprint no longer requests, and would now resolve to a plain
+      # file inside the container that a restart throws away.
       - key: DATABASE_URL
-        value: file:/var/data/grape.db
+        sync: false
+
+      # From `turso db tokens create <name>`. A local file: URL has nothing to
+      # authenticate to and ignores this; it exists for exactly this remote
+      # case. Kept out of the file, like the Anthropic key, because both
+      # belong to your account rather than to this checkout.
+      - key: DATABASE_AUTH_TOKEN
+        sync: false
 
       # Ollama runs on your own machine and does not exist here, so the local
       # provider is not an option on this host.

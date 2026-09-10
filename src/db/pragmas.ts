@@ -11,6 +11,13 @@ import type { Client } from "@libsql/client";
  *
  * Kept in its own module, free of side effects, so the migration script can
  * apply the same settings without importing the app's connection.
+ *
+ * `journal_mode` and `busy_timeout` are a local-file concern: sqld, the
+ * server a libsql:// URL talks to, owns its own storage engine and manages
+ * concurrency itself, so it rejects both pragmas outright rather than
+ * silently ignoring them. `foreign_keys` it does honor. So each pragma is
+ * applied on its own and a rejection is swallowed — the two that matter only
+ * for a local file simply have nothing to do against a remote database.
  */
 const PRAGMAS = [
   "PRAGMA foreign_keys = ON",
@@ -19,5 +26,11 @@ const PRAGMAS = [
 ];
 
 export async function applyPragmas(client: Pick<Client, "execute">): Promise<void> {
-  for (const pragma of PRAGMAS) await client.execute(pragma);
+  for (const pragma of PRAGMAS) {
+    try {
+      await client.execute(pragma);
+    } catch {
+      // Not supported by this server — see the note above.
+    }
+  }
 }

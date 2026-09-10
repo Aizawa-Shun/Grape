@@ -1,8 +1,8 @@
 import { createClient, type Client } from "@libsql/client";
 import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
 
-import { env } from "@/env";
 import { applyPragmas } from "./pragmas";
+import { databaseCredentials } from "./connection";
 import * as schema from "./schema";
 
 export type Database = LibSQLDatabase<typeof schema>;
@@ -32,7 +32,7 @@ const globalForDb = globalThis as typeof globalThis & {
 };
 
 function create(): { client: Client; db: Database } {
-  const client = createClient({ url: env.DATABASE_URL });
+  const client = createClient(databaseCredentials());
   return { client, db: drizzle(client, { schema }) };
 }
 

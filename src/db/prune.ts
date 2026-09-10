@@ -4,6 +4,7 @@ import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import { lt } from "drizzle-orm";
 
+import { databaseCredentials } from "./connection";
 import { applyPragmas } from "./pragmas";
 import * as schema from "./schema";
 
@@ -19,11 +20,11 @@ import * as schema from "./schema";
  * CommonJS and a top-level await fails with ERR_REQUIRE_ASYNC_MODULE.
  */
 async function main(): Promise<void> {
-  const url = process.env.DATABASE_URL ?? "file:./grape.db";
+  const { url } = databaseCredentials();
   const days = Number(process.env.GRAPE_EVENT_RETENTION_DAYS ?? 180);
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-  const client = createClient({ url });
+  const client = createClient(databaseCredentials());
   try {
     await applyPragmas(client);
     const db = drizzle(client, { schema });

@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { Page, PageHeader, Section } from "@/components/ui/page";
 
 import { ContextEditor } from "./context-editor";
+import { DeleteProductButton } from "./delete-product-button";
 
 import { findOwnedProduct } from "@/core/product/ownership";
 import { db, schema } from "@/db/client";
@@ -50,6 +51,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
             {product.url}
           </a>
         }
+        actions={<DeleteProductButton productId={id} name={product.name} />}
       />
 
       <Section

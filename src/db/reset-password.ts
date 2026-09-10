@@ -5,8 +5,9 @@ import { drizzle } from "drizzle-orm/libsql";
 import { eq } from "drizzle-orm";
 
 import { hashPassword } from "@/server/auth/password";
-import * as schema from "./schema";
+import { databaseCredentials } from "./connection";
 import { applyPragmas } from "./pragmas";
+import * as schema from "./schema";
 
 /**
  * Sets an account's password from the server's shell.
@@ -29,7 +30,7 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  const client = createClient({ url: process.env.DATABASE_URL ?? "file:./grape.db" });
+  const client = createClient(databaseCredentials());
   try {
     await applyPragmas(client);
     const db = drizzle(client, { schema });

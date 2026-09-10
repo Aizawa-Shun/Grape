@@ -5,6 +5,8 @@ import path from "node:path";
 
 import { createClient } from "@libsql/client";
 
+import { databaseCredentials } from "./connection";
+
 /**
  * A consistent snapshot without stopping the server.
  *
@@ -27,7 +29,20 @@ function stamp(date: Date): string {
 }
 
 async function main(): Promise<void> {
-  const url = process.env.DATABASE_URL ?? "file:./grape.db";
+  const { url, authToken } = databaseCredentials();
+
+  // VACUUM INTO writes a file next to whatever the connection is attached to.
+  // Against a local file that is this machine's disk; against libsql:// it
+  // would be sqld's disk on Turso's side, unreachable from here and not what
+  // "back this up" means. Turso already replicates and offers its own
+  // export/dump; this script is for the file: URL case only.
+  if (authToken) {
+    console.error(
+      `${url} is a remote database — pnpm db:backup only knows how to VACUUM INTO a local file. Use Turso's own backup/export for a remote database.`,
+    );
+    process.exit(1);
+  }
+
   await mkdir(DIRECTORY, { recursive: true });
 
   // Built with forward slashes rather than path.join: this string goes into
