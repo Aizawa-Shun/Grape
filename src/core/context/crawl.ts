@@ -36,6 +36,26 @@ import { findManifestUrl, jsonLdToMeta, manifestToMeta } from "./structured";
  * would see a one-page site.
  */
 
+/**
+ * One heading and the copy underneath it.
+ *
+ * `text` alone is a single run of words with every structural boundary
+ * collapsed out of it — "Dominion ModeSeize the board.Every move paints…" —
+ * which a model can still read but a rule can not. These sections keep the one
+ * piece of structure a landing page actually uses to make its argument: a
+ * claim as a heading, with its explanation beneath. That is what lets
+ * core/context/extract.ts quote the site about who it is for, without a model
+ * and without inventing anything.
+ */
+export interface PageSection {
+  /** Heading text, whitespace collapsed. Never empty. */
+  heading: string;
+  /** 1-3, from h1-h3. Deeper headings are page furniture more often than argument. */
+  level: number;
+  /** Copy between this heading and the next one. Empty when the markup puts them in separate containers. */
+  body: string;
+}
+
 export interface CrawledPage {
   url: string;
   status: number;
@@ -48,6 +68,8 @@ export interface CrawledPage {
    * a machine-readable assertion from the page's own visible copy.
    */
   meta: Record<string, string>;
+  /** Headings and the copy under each, in document order. See PageSection. */
+  sections: PageSection[];
   /** Same-origin links found on this page, absolute and de-duplicated. */
   links: string[];
   /** Which of the three steps above produced `text`. */
@@ -75,7 +97,13 @@ export interface CrawlOptions {
 }
 
 const DEFAULTS = {
-  maxPages: 5,
+  // Raised from 5 once extraction stopped being a single model call over the
+  // entry page: the rule-based reading quotes whichever page actually states
+  // who the product is for, and those are exactly the /about, /pricing and
+  // /features pages that a 5-page budget spent on the nav never reached.
+  // Costs a few seconds per extra page and nothing else — registration is
+  // already a deliberate, one-off wait with its own progress indicator.
+  maxPages: 8,
   timeoutMs: 15_000,
   maxTextChars: 20_000,
   /**
@@ -154,8 +182,6 @@ export function parseHtml(html: string, pageUrl: string, maxTextChars: number): 
   const declaredLang = $("html").attr("lang")?.trim();
   if (declaredLang) meta["html:lang"] = declaredLang;
 
-  const text = $("body").text().replace(/\s+/g, " ").trim().slice(0, maxTextChars);
-
   const origin = new URL(pageUrl).origin;
   const links = new Set<string>();
   $("a[href]").each((_, element) => {
@@ -168,14 +194,149 @@ export function parseHtml(html: string, pageUrl: string, maxTextChars: number): 
     links.add(absolute);
   });
 
+  const title = $("title").first().text().trim() || null;
+  const headingSections = extractSections($);
+  // Last, because it rewrites the DOM to recover line breaks — everything
+  // above reads the markup as served.
+  const text = visibleText($, maxTextChars);
+
   return {
     url: pageUrl,
-    title: $("title").first().text().trim() || null,
+    title,
     text,
     meta,
+    sections: headingSections.length > 0 ? headingSections : sectionsFromLines(text),
     links: [...links],
     manifestUrl,
   };
+}
+
+/** Enough to cover a long landing page; past this a document is a listing, not an argument. */
+const MAX_SECTIONS = 60;
+/** A section body is a paragraph or two of supporting copy — anything longer is the rest of the page leaking in. */
+const MAX_SECTION_BODY_CHARS = 600;
+
+function collapse(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+/** Elements that end a line when a reader looks at the page, whatever the markup does about it. */
+const BLOCK_ELEMENTS =
+  "p, div, section, article, aside, header, footer, main, nav, li, dt, dd, tr, h1, h2, h3, h4, h5, h6, blockquote, figcaption, pre, hr, table, form, label, button";
+
+/**
+ * The visible copy, with the line breaks a reader sees.
+ *
+ * `$("body").text()` concatenates every text node with nothing between them,
+ * so a page whose pitch reads
+ *
+ *     CHEEEESS
+ *     Chess, but bigger.
+ *     An 8×16 board. New space. New strategy.
+ *
+ * arrives as `CHEEEESSChess, but bigger.An 8×16 board…` — one run of words
+ * with every boundary between a claim and its explanation erased. A model can
+ * still read that; a rule cannot, and neither can a person looking at the
+ * crawled-pages screen. Appending a newline to each block element before
+ * flattening recovers exactly the structure that was thrown away, which is
+ * what makes sectionsFromLines possible on a site built entirely from divs.
+ *
+ * Destructive to the DOM, so it runs last in parseHtml.
+ */
+function visibleText($: cheerio.CheerioAPI, maxChars: number): string {
+  $("br").replaceWith("\n");
+  $(BLOCK_ELEMENTS).each((_, element) => {
+    $(element).append("\n");
+  });
+
+  return $("body")
+    .text()
+    // Horizontal whitespace only — collapsing \s+ here would undo the above.
+    .replace(/[^\S\n]+/g, " ")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, maxChars);
+}
+
+/**
+ * The one threshold this guess turns on: at or above it a line is a sentence
+ * explaining something, below it a heading, a nav item or a button. Sorting
+ * every line into one of those two piles is what stands in for the heading
+ * markup the page never used.
+ */
+const BODY_MIN_CHARS = 40;
+/** How many short lines above a sentence still count as its heading. */
+const MAX_HEADING_LINES = 2;
+
+/**
+ * Sections for a page with no heading markup at all.
+ *
+ * Plenty of sites are built entirely from styled `<div>`s — the h1/h2 that
+ * extractSections looks for never appear, and cheeeess.com is one of them.
+ * What such a page still has is shape: a short line making a claim, then a
+ * sentence explaining it. That is the same structure a heading encodes, just
+ * expressed in font size instead of markup, and it is recoverable from the
+ * line breaks visibleText restores.
+ *
+ * A guess, unlike extractSections, which is why headings win when they exist.
+ * The quoted text is still only ever the page's own — see the note
+ * core/context/extract.ts attaches to everything built from these.
+ */
+function sectionsFromLines(text: string): PageSection[] {
+  const sections: PageSection[] = [];
+  let pending: string[] = [];
+
+  for (const line of text.split("\n")) {
+    if (line.length < BODY_MIN_CHARS) {
+      pending.push(line);
+      if (pending.length > MAX_HEADING_LINES) pending.shift();
+      continue;
+    }
+
+    // A sentence: it explains whichever short lines led up to it.
+    if (pending.length > 0) {
+      sections.push({
+        heading: pending.join(" "),
+        // Always 2: without markup there is no depth to report, and 1 would
+        // claim this is the page's h1, which nothing here established.
+        level: 2,
+        body: line.slice(0, MAX_SECTION_BODY_CHARS),
+      });
+      pending = [];
+      if (sections.length >= MAX_SECTIONS) break;
+    }
+  }
+
+  return sections;
+}
+
+/**
+ * `nextUntil` rather than a full document walk: a heading's explanation is
+ * normally its own next sibling, and the cases where it is not — heading and
+ * copy in separate wrapper divs — still leave the heading itself, which is the
+ * half that carries the claim. An empty body is therefore a recorded outcome,
+ * not a failure to handle.
+ */
+function extractSections($: cheerio.CheerioAPI): PageSection[] {
+  const sections: PageSection[] = [];
+
+  $("h1, h2, h3").each((_, element) => {
+    if (sections.length >= MAX_SECTIONS) return false;
+
+    const node = $(element);
+    const heading = collapse(node.text());
+    if (!heading) return;
+
+    sections.push({
+      heading,
+      level: Number(element.tagName.slice(1)),
+      body: collapse(node.nextUntil("h1, h2, h3").text()).slice(0, MAX_SECTION_BODY_CHARS),
+    });
+  });
+
+  return sections;
 }
 
 interface FetchSettings {
@@ -226,7 +387,7 @@ async function fetchPage(url: string, options: FetchSettings): Promise<FetchedPa
 }
 
 function unreadable(url: string, status: number): CrawledPage {
-  return { url, status, title: null, text: "", meta: {}, links: [], renderedWith: "static" };
+  return { url, status, title: null, text: "", meta: {}, sections: [], links: [], renderedWith: "static" };
 }
 
 async function toCrawledPage(

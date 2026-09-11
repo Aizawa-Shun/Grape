@@ -120,6 +120,68 @@ describe("parseHtml", () => {
     const long = parseHtml(`<body>${"x".repeat(500)}</body>`, "https://example.com/", 100);
     expect(long.text).toHaveLength(100);
   });
+
+  /**
+   * Without the block-level newlines, `<h1>Widget</h1><p>Ship faster.</p>`
+   * flattens to "WidgetShip faster." — the boundary between a claim and its
+   * explanation, which is the only structure a rule-based read has to work
+   * with, disappears.
+   */
+  it("keeps the line breaks a reader sees, rather than running blocks together", () => {
+    expect(parsed.text).toContain("Widget\nShip faster.");
+  });
+
+  it("pairs each heading with the copy underneath it", () => {
+    const withSections = parseHtml(
+      `<body>
+        <section><h2>Pricing</h2><p>Free while in beta.</p></section>
+        <section><h2>Who it's for</h2><p>Solo founders.</p></section>
+      </body>`,
+      "https://example.com/",
+      20_000,
+    );
+
+    expect(withSections.sections).toEqual([
+      { heading: "Pricing", level: 2, body: "Free while in beta." },
+      { heading: "Who it's for", level: 2, body: "Solo founders." },
+    ]);
+  });
+
+  /**
+   * Plenty of real sites are styled divs with no heading markup at all —
+   * cheeeess.com is one — and reading nothing off them would leave the whole
+   * rule-based extraction empty for exactly the sites most likely to be built
+   * that way.
+   */
+  it("recovers sections from line shape when a page has no headings at all", () => {
+    const divsOnly = parseHtml(
+      `<body>
+        <div>CHEEEESS</div>
+        <div>Chess, but bigger.</div>
+        <div>An 8×16 board. New space. New strategy. The same game reimagined.</div>
+      </body>`,
+      "https://example.com/",
+      20_000,
+    );
+
+    expect(divsOnly.sections).toHaveLength(1);
+    expect(divsOnly.sections[0].heading).toBe("CHEEEESS Chess, but bigger.");
+    expect(divsOnly.sections[0].body).toContain("An 8×16 board.");
+  });
+
+  it("prefers real headings over the line-shape guess when both are available", () => {
+    const both = parseHtml(
+      `<body>
+        <div>A short line</div>
+        <div>A sentence long enough to be treated as body copy by the guess.</div>
+        <h2>An actual heading</h2><p>With its own explanation underneath it.</p>
+      </body>`,
+      "https://example.com/",
+      20_000,
+    );
+
+    expect(both.sections.map((section) => section.heading)).toEqual(["An actual heading"]);
+  });
 });
 
 describe("crawlSite", () => {

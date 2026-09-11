@@ -3,7 +3,7 @@ import { z } from "zod";
 import { AppError } from "@/core/errors";
 import type { LLMProvider } from "@/core/llm";
 
-import type { CrawledPage } from "./crawl";
+import type { CrawledPage, PageSection } from "./crawl";
 
 /**
  * The back half of the Product Context Engine: crawled pages in, a structured
@@ -185,12 +185,16 @@ export const UNSTATED = "サイト上に明示なし";
 const NO_TEXT_NOTE =
   "取得したページに本文テキストが無かったため抽出できませんでした(クライアント側JavaScriptで描画されるサイトの可能性があります)。";
 
-const WHO_UNKNOWABLE_MECHANICALLY =
-  "誰のためのものかは、meta descriptionやタイトルからは機械的に判定できません。";
-const WHY_UNKNOWABLE_MECHANICALLY =
-  "なぜ必要とされるかは、meta descriptionやタイトルからは機械的に判定できません。";
-const HOW_UNKNOWABLE_MECHANICALLY =
-  "どう使うのかは、meta descriptionやタイトルからは機械的に判定できません。";
+/**
+ * The note that has to accompany every rule-based field, because the rule is
+ * a keyword match on a heading, not an understanding of the page: a section
+ * titled "なぜCheeeessなのか" is quoted under `why` on the strength of the
+ * word "なぜ" alone. The quoted copy is always the site's own — nothing here
+ * writes a sentence the site did not — but which box it landed in is a guess,
+ * and the reader is the one who can tell.
+ */
+const MECHANICAL_NOTE =
+  "この内容はサイトの見出しと本文から機械的に拾ったものです。的外れな箇所は直してください。";
 
 /** First reachable page stands in for "the site's own account of itself" — normally the entry URL, since crawlSite visits it first. */
 function primaryPage(pages: CrawledPage[]): CrawledPage {
@@ -205,16 +209,152 @@ function metaValue(page: CrawledPage, ...keys: string[]): string | undefined {
   return undefined;
 }
 
+interface LocatedSection extends PageSection {
+  /** Which crawled page this heading came from, so a quote can cite it. */
+  url: string;
+}
+
+/**
+ * Headings that announce who the product is for. Deliberately broad on the
+ * Japanese side ("〜向け", "こんな方") and anchored to the noun on the English
+ * side ("for developers"), because a bare "for" matches nearly every heading
+ * ever written.
+ */
+const AUDIENCE_HEADING =
+  /向け|のため(の|に)|な人|こんな方|対象|誰のため|who ?(is|are|it'?s)?[^。.]{0,12}for\b|built for|made for|designed for|for (developers?|designers?|teams?|founders?|students?|beginners?|creators?|writers?|engineers?|marketers?|everyone)\b/i;
+
+/** Headings that frame a problem — the "why this rather than what you already do". */
+const PROBLEM_HEADING =
+  /課題|悩み|困(る|った|って)|できない|大変|面倒|不便|なぜ|理由|problem|pain|why\b|struggl|tired of|instead of|frustrat/i;
+
+/** Headings that explain mechanics, onboarding or terms of use. */
+const HOWTO_HEADING =
+  /使い方|使いかた|始め方|はじめ(方|かた)|仕組み|ステップ|手順|流れ|料金|価格|プラン|無料|how (it works|to)\b|getting started|get started|pricing|plans?\b|setup|set ?up|workflow|steps?\b/i;
+
+/** Long enough to be an argument rather than a nav label, short enough to sit in a table cell. */
+const MAX_FIELD_CHARS = 400;
+
+/**
+ * Below this a "body" is a stray label rather than an explanation — zenn.dev
+ * has a heading "Tech" whose entire body is "？", which is true, quotable, and
+ * says nothing.
+ */
+const MIN_BODY_CHARS = 40;
+
+function truncate(value: string): string {
+  return value.length <= MAX_FIELD_CHARS ? value : `${value.slice(0, MAX_FIELD_CHARS - 1)}…`;
+}
+
+function quoteSection(section: LocatedSection): string {
+  return section.body ? `${section.heading}：${section.body}` : section.heading;
+}
+
+/**
+ * Quotes up to `limit` sections whose *heading* matches, joined into one
+ * field. Matching on the heading rather than the body on purpose: a body
+ * mentioning "料金" in passing says nothing about the section, whereas a
+ * heading is the page's own label for what follows it.
+ */
+function quoteMatching(
+  sections: LocatedSection[],
+  pattern: RegExp,
+  limit = 2,
+): { text: string; urls: string[] } | null {
+  const matched = sections.filter((section) => pattern.test(section.heading)).slice(0, limit);
+  if (matched.length === 0) return null;
+
+  return {
+    text: truncate(matched.map(quoteSection).join(" / ")),
+    urls: [...new Set(matched.map((section) => section.url))],
+  };
+}
+
+/**
+ * Pages that exist to explain the product, as opposed to pages that merely
+ * live on the same domain. The crawler already prefers these when spending
+ * its page budget (see PRIORITY_PATTERNS in crawl.ts); this is the same
+ * judgment applied again at quoting time, where it matters more.
+ */
+const EXPLAINER_PATH =
+  /^\/?(about|what|product|features?|why|pricing|plans?|docs?|documentation|guide|getting-?started|faq|help|support|tour|use-?cases?)/i;
+
+/**
+ * The entry page first, then the pages written to explain the product, and
+ * nothing else.
+ *
+ * Without this, a keyword match anywhere in the crawl wins: zenn.dev's answer
+ * to "who is this for" came back as a skills blurb from one hackathon's
+ * announcement page, on the strength of the word "向け" in its heading, while
+ * /about — the page written to answer exactly that question — went unquoted.
+ * A site states what it is on its front page and its about page; a campaign
+ * page that happens to share the domain is not evidence about the product.
+ */
+function quotablePages(sections: LocatedSection[], entryUrl: string): LocatedSection[] {
+  const own = sections.filter((section) => section.url === entryUrl);
+  const explainers = sections.filter(
+    (section) => section.url !== entryUrl && EXPLAINER_PATH.test(new URL(section.url).pathname),
+  );
+  return [...own, ...explainers];
+}
+
+/**
+ * The page's own one-sentence pitch: its h1 and the line under it, or — on a
+ * page with no heading markup, where every section came from
+ * sectionsFromLines — whatever it leads with, since the first thing above the
+ * fold is the pitch by construction.
+ *
+ * Frequently better copy than the meta description, and worth keeping even
+ * when it disagrees with it: cheeeess.com serves a description calling itself
+ * a 将棋 site while the page itself is about 8×16 chess, and showing both is
+ * how its owner finds that out.
+ */
+function leadFrom(sections: LocatedSection[], entryUrl: string): LocatedSection | null {
+  // Must have copy under it. The first thing on a front page is as often a
+  // campaign banner as a pitch — zenn.dev opens with "第5回 Agentic AI
+  // Hackathon エントリー受付中！" — and a banner is a headline with nothing
+  // beneath it, while a pitch explains itself on the next line.
+  const own = sections.filter(
+    (section) => section.url === entryUrl && section.body.length >= MIN_BODY_CHARS,
+  );
+  return own.find((section) => section.level === 1) ?? own[0] ?? null;
+}
+
+/**
+ * What the site spends its page explaining, for when no heading matched
+ * HOWTO_HEADING. A landing page's h2s are its feature argument — "Dominion
+ * Mode: every move paints the squares you pass through" is a real answer to
+ * "how does this work", and withholding it because the heading did not
+ * contain the word 仕組み would be strictly less useful than quoting it and
+ * saying where it came from (see MECHANICAL_NOTE).
+ */
+function explanatorySections(
+  sections: LocatedSection[],
+  limit = 3,
+): { text: string; urls: string[] } | null {
+  const substantial = sections.filter((section) => section.body.length >= MIN_BODY_CHARS);
+  if (substantial.length === 0) return null;
+
+  const picked = substantial.slice(0, limit);
+  return {
+    text: truncate(picked.map(quoteSection).join(" / ")),
+    urls: [...new Set(picked.map((section) => section.url))],
+  };
+}
+
 /**
  * The no-AI baseline, and the draft an AI extraction is asked to correct.
  *
- * Deliberately narrow: a title tag and a meta description say what a page
- * *claims* to be, never who it is for or why they'd choose it over the
- * alternative they already have — reading that out of a paragraph of body
- * text is exactly the judgment call this function does not make. `who` and
- * `why` are reported unstated on principle here, not because this particular
- * site failed to say them; only `what` (and a thin `how`) come from what a
- * page's own metadata already asserts about itself.
+ * Reads two things the site states about itself: its metadata (description,
+ * og:, JSON-LD, the PWA manifest) and its heading structure. Nothing here
+ * writes a sentence the site did not — every field is either a quote or
+ * `UNSTATED` — which is the same rule the extraction prompt puts on the
+ * model, enforced here by construction rather than by instruction.
+ *
+ * What it cannot do is judge. A heading match decides which field a quote
+ * lands in, so `who` is filled when a heading says "開発者向け", and left
+ * unstated when the page conveys the same thing in a paragraph. That is the
+ * honest boundary of a rule, and why `confidence` here tops out well below
+ * what a model extraction claims.
  */
 export function buildRuleBasedContext(pages: CrawledPage[]): ProductContextExtraction {
   const reachable = pages.filter(hasEvidence);
@@ -232,30 +372,73 @@ export function buildRuleBasedContext(pages: CrawledPage[]): ProductContextExtra
   }
 
   const page = primaryPage(reachable);
+  const sections: LocatedSection[] = quotablePages(
+    reachable.flatMap((source) => source.sections.map((section) => ({ ...section, url: source.url }))),
+    page.url,
+  );
+
   const name = metaValue(page, "og:site_name") ?? metaValue(page, "ld:name") ?? page.title?.trim();
-  const description = metaValue(page, "description", "og:description", "twitter:description", "ld:description");
+  const description = metaValue(
+    page,
+    "description",
+    "og:description",
+    "twitter:description",
+    "ld:description",
+    "manifest:description",
+  );
+  const lead = leadFrom(sections, page.url);
 
-  const what = description
-    ? name && !description.includes(name)
-      ? `${name}。${description}`
-      : description
-    : UNSTATED;
+  // Both when both exist and they are not saying the same thing: a meta
+  // description is written for search results and the pitch above the fold
+  // for the reader, and the two are often complementary rather than duplicates.
+  const whatParts = [
+    description && name && !description.includes(name) ? `${name}。${description}` : description,
+    lead && (!description || !description.includes(lead.heading)) ? quoteSection(lead) : undefined,
+  ].filter((part): part is string => Boolean(part));
 
-  const gaps = [WHO_UNKNOWABLE_MECHANICALLY, WHY_UNKNOWABLE_MECHANICALLY, HOW_UNKNOWABLE_MECHANICALLY];
-  if (!description) gaps.unshift("サイトに説明文（meta descriptionなど）が見つかりませんでした。");
+  // Keyword matches see every section, the lead included: a page whose only
+  // heading is "開発者向け" is stating its audience, and withholding that
+  // because the same heading opens the page would lose the one thing it said.
+  const audience = quoteMatching(sections, AUDIENCE_HEADING);
+  const problem = quoteMatching(sections, PROBLEM_HEADING);
+
+  // The fallback does not, because it has no such evidence — it quotes
+  // whatever comes first, and the lead is already quoted under `what`.
+  const rest = lead ? sections.filter((section) => section !== lead) : sections;
+  const howto = quoteMatching(sections, HOWTO_HEADING) ?? explanatorySections(rest);
+
+  const gaps: string[] = [];
+  if (whatParts.length === 0) gaps.push("何をするものかを説明する文が、サイトから見つかりませんでした。");
+  if (!audience) gaps.push("誰のためのものかを書いた見出しが、サイトに見つかりませんでした。");
+  if (!problem) gaps.push("なぜ必要とされるかを書いた見出しが、サイトに見つかりませんでした。");
+  if (!howto) gaps.push("どう使うのかを書いた見出しが、サイトに見つかりませんでした。");
+
+  const found = [whatParts.length > 0, audience, problem, howto].filter(Boolean).length;
+  if (found > 0) gaps.push(MECHANICAL_NOTE);
+
+  const evidenceUrls = [
+    ...new Set([
+      ...(whatParts.length > 0 ? [page.url] : []),
+      ...(lead ? [lead.url] : []),
+      ...(audience?.urls ?? []),
+      ...(problem?.urls ?? []),
+      ...(howto?.urls ?? []),
+    ]),
+  ];
 
   return {
-    what,
-    who: UNSTATED,
-    why: UNSTATED,
-    how: UNSTATED,
+    what: whatParts.length > 0 ? truncate(whatParts.join(" ")) : UNSTATED,
+    who: audience?.text ?? UNSTATED,
+    why: problem?.text ?? UNSTATED,
+    how: howto?.text ?? UNSTATED,
     primaryLanguage: metaValue(page, "html:lang", "manifest:lang") ?? "und",
-    evidenceUrls: description ? [page.url] : [],
+    evidenceUrls,
     gaps,
-    // Low on purpose: this is a metadata lookup, not a reading of the page —
-    // even a correct `what` here is a much thinner claim than the model
-    // extraction's confidence is meant to represent.
-    confidence: description ? 0.3 : 0,
+    // Capped at half on purpose, however many fields came back filled: every
+    // one of them is a keyword match on a heading, and a rule that happened to
+    // match four headings is not therefore twice as sure as a model that read
+    // the page.
+    confidence: found === 0 ? 0 : Math.round(Math.min(0.5, 0.15 + found * 0.1) * 100) / 100,
   };
 }
 

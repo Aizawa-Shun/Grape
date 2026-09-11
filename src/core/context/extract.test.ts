@@ -15,10 +15,15 @@ function page(overrides: Partial<CrawledPage> = {}): CrawledPage {
     title: null,
     text: "",
     meta: {},
+    sections: [],
     links: [],
     renderedWith: "static",
     ...overrides,
   };
+}
+
+function section(heading: string, body = "", level = 2) {
+  return { heading, body, level };
 }
 
 describe("ProductContextExtractionSchema", () => {
@@ -112,6 +117,8 @@ describe("buildExtractionInput", () => {
 });
 
 describe("buildRuleBasedContext", () => {
+  const explanation = "これは本文として扱われるだけの長さを持った説明文です。ここに中身が書かれています。";
+
   it("reads what from the page's own description, without asking who or why", () => {
     const result = buildRuleBasedContext([
       page({
@@ -127,6 +134,116 @@ describe("buildRuleBasedContext", () => {
     expect(result.primaryLanguage).toBe("ja");
     expect(result.confidence).toBeGreaterThan(0);
     expect(result.confidence).toBeLessThan(1);
+  });
+
+  it("quotes the site about who it is for when a heading says so", () => {
+    const result = buildRuleBasedContext([
+      page({
+        text: "本文",
+        meta: { description: "説明" },
+        sections: [section("個人開発者向け", explanation)],
+      }),
+    ]);
+
+    expect(result.who).toContain("個人開発者向け");
+    expect(result.who).toContain(explanation);
+  });
+
+  it("quotes the problem a heading frames, under why", () => {
+    const result = buildRuleBasedContext([
+      page({
+        text: "本文",
+        meta: { description: "説明" },
+        sections: [section("なぜ必要なのか", explanation)],
+      }),
+    ]);
+
+    expect(result.why).toContain("なぜ必要なのか");
+  });
+
+  /**
+   * The alternative was leaving `how` empty on every site that explains itself
+   * without ever using the word 仕組み — which is most of them.
+   */
+  it("falls back to whatever the page actually explains when no heading matches how", () => {
+    const result = buildRuleBasedContext([
+      page({
+        text: "本文",
+        meta: { description: "説明" },
+        sections: [
+          section("ヒーロー", explanation),
+          section("Dominion Mode", explanation),
+          section("盤面を塗る", explanation),
+        ],
+      }),
+    ]);
+
+    expect(result.how).toContain("Dominion Mode");
+    expect(result.how).toContain("盤面を塗る");
+  });
+
+  it("never repeats the lead it already quoted under what", () => {
+    const result = buildRuleBasedContext([
+      page({
+        text: "本文",
+        sections: [section("見出しA", explanation), section("見出しB", explanation)],
+      }),
+    ]);
+
+    expect(result.what).toContain("見出しA");
+    expect(result.how).not.toContain("見出しA");
+    expect(result.how).toContain("見出しB");
+  });
+
+  /**
+   * zenn.dev answered "who is this for" out of one hackathon's announcement
+   * page, on the word "向け" alone, while /about went unread.
+   */
+  it("ignores headings on pages that are not about the product", () => {
+    const result = buildRuleBasedContext([
+      page({ url: "https://example.com/", text: "本文", meta: { description: "説明" } }),
+      page({
+        url: "https://example.com/campaigns/2026-spring",
+        text: "本文",
+        sections: [section("学生向けキャンペーン", explanation)],
+      }),
+    ]);
+
+    expect(result.who).toBe("サイト上に明示なし");
+  });
+
+  it("does quote a page written to explain the product", () => {
+    const result = buildRuleBasedContext([
+      page({ url: "https://example.com/", text: "本文", meta: { description: "説明" } }),
+      page({
+        url: "https://example.com/about",
+        text: "本文",
+        sections: [section("学生向けのサービスです", explanation)],
+      }),
+    ]);
+
+    expect(result.who).toContain("学生向けのサービスです");
+    expect(result.evidenceUrls).toContain("https://example.com/about");
+  });
+
+  /** Every field is a keyword match on a heading, however many of them landed. */
+  it("never claims more than half confidence, since a heading match is not a reading", () => {
+    const result = buildRuleBasedContext([
+      page({
+        text: "本文",
+        meta: { description: "説明" },
+        sections: [
+          section("開発者向け", explanation),
+          section("なぜ必要か", explanation),
+          section("使い方", explanation),
+        ],
+      }),
+    ]);
+
+    expect(result.who).not.toBe("サイト上に明示なし");
+    expect(result.why).not.toBe("サイト上に明示なし");
+    expect(result.how).not.toBe("サイト上に明示なし");
+    expect(result.confidence).toBeLessThanOrEqual(0.5);
   });
 
   it("falls back to unstated everywhere when the site has no description at all", () => {

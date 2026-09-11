@@ -12,6 +12,7 @@ function page(overrides: Partial<CrawledPage> = {}): CrawledPage {
     title: "Example",
     text: "",
     meta: {},
+    sections: [],
     links: [],
     renderedWith: "static",
     ...overrides,
