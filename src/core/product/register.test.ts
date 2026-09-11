@@ -36,7 +36,7 @@ vi.mock("@/core/context/extract", () => ({
   extractProductContext: (...args: unknown[]) => extractProductContext(...args),
 }));
 
-vi.mock("@/core/llm", () => ({ getProvider: () => ({}) }));
+vi.mock("@/core/llm", () => ({ getProvider: () => ({}), llmAvailable: () => true }));
 
 let userId: string;
 

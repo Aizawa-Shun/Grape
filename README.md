@@ -21,6 +21,10 @@ LLMのおかげでWebサービスは一人でも作れるようになりまし�
 AIは「なぜそうなっているか」を書くところにしか使いません。**
 どこが詰まっているかはAIの気分では変わりません。
 
+**AIは既定でオフです（後述）。** 1のプロダクト理解は、AIを設定していなければ
+サイトのmeta descriptionやタイトルをそのまま整理するだけのルールベースで動きます。
+4・5のようにAIが文章そのものを書く機能は、AIを設定するまで使えません。
+
 ## はじめかた
 
 ```bash
@@ -30,11 +34,14 @@ pnpm db:migrate           # データベースを作る
 pnpm dev                  # http://localhost:3000
 ```
 
-AIの接続先は `.env` の `LLM_PROVIDER` で選びます。
+**AIは既定でオフです。** `.env` の `LLM_PROVIDER` を設定するまで、診断のコメントや
+投稿文面の生成といったAI機能は使えません（プロダクト理解だけは、AIが無くても
+サイトの内容をそのまま整理する形で動きます）。使うときは `LLM_PROVIDER` と、
+対応するAPIキーの両方を設定してください。片方だけでは起動しません。
 
-- `anthropic`（既定）— `ANTHROPIC_API_KEY` を設定するか `ant auth login` を済ませておく
-- `ollama` — 手元のモデル。無料ですが遅いです（このマシンでは1.5Bで実用の下限でした）
-- `openai-compat` — OpenAI / LM Studio / vLLM / llama.cpp など
+- `anthropic` — `ANTHROPIC_API_KEY` が必須
+- `openai-compat` — OpenAI / LM Studio / vLLM / llama.cpp など。`OPENAI_BASE_URL`
+  が `localhost` ならキー不要、それ以外は `OPENAI_API_KEY` が必須
 
 ### サイトから訪問を届けるには
 
@@ -77,11 +84,12 @@ pnpm tunnel               # https://....trycloudflare.com が表示されます
 3. GitHub（または GitLab）にリポジトリを作って push する
 4. Render で **New → Blueprint** を選び、そのリポジトリを指定する
 5. 訊かれる値を入れる
-   - `ANTHROPIC_API_KEY` — サーバーでは `ant auth login` が使えないので必須です
    - `DATABASE_URL` — 手順2の `libsql://...`
    - `DATABASE_AUTH_TOKEN` — 手順2のトークン
    - `GRAPE_SESSION_SECRET` — **必須**。これが無いと、公開URLからは全部503になります
      （Renderが自動生成するので、そのままで構いません）
+   - `ANTHROPIC_API_KEY` — 空のままでも構いません。AIは既定でオフで、後から
+     `LLM_PROVIDER` と一緒に設定できます（下記「AIを使えるようにする」を参照）
 6. 初回デプロイ後、割り当てられた `https://....onrender.com` を開いて、
    **最初のアカウントを作る**（先に開いた人がオーナーになります）
 7. `/settings` の「計測用のコード」をコピーして、自分のサイトに貼る
@@ -97,6 +105,23 @@ pnpm tunnel               # https://....trycloudflare.com が表示されます
 **デプロイしたら、まず自分でアカウントを作ってください。** 登録画面は
 アカウントが1つも無い間だけ開いていて、最初の登録で閉じます。放置した公開URLを
 先に見つけた人がオーナーになれてしまうので、デプロイ直後にやるべき唯一の作業です。
+
+### AIを使えるようにする
+
+AIは既定でオフです。プロダクト理解（何を・誰に・なぜ・どう）はAIなしでも、
+サイトのmeta descriptionやタイトルをそのまま整理する形で動きますが、診断の
+コメントや投稿文面の生成はAIを設定するまで使えません。
+
+Render の Environment に、以下を**両方**設定してください（片方だけでは
+起動しません）。
+
+```bash
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+`openai-compat`（OpenAI本体やLM Studioなど）を使う場合は、代わりに
+`LLM_PROVIDER=openai-compat` と `OPENAI_API_KEY` を設定します。
 
 ### Googleでログインできるようにする
 
@@ -146,9 +171,8 @@ pnpm db:reset-password you@example.com '新しいパスワード'
 消えません。ただし放置後の最初のアクセスは、起き直す分だけ数秒〜十数秒遅くなります。
 待たせたくない場合は Render のプランを有料に上げてください。
 
-> **AIの接続先は `anthropic` になります。** Ollama はあなたのパソコンで動くもので、
-> Render 上には存在しません。ローカルで Ollama を使っていた場合、
-> 費用の出かたが変わる点に注意してください。
+> **AIを使うなら `anthropic` か `openai-compat` を Render 側でも設定してください。**
+> ローカルの `.env` の設定はサーバーには引き継がれません。
 
 > **クライアント描画のサイトは読めなくなる場合があります。** Chromium は
 > Render の標準ランタイムには入っていません。読めない場合は警告を1回出して

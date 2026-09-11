@@ -26,22 +26,22 @@ describe("OVERRIDABLE_KEYS", () => {
 
   it("covers the operational settings someone would actually want to change", () => {
     expect(OVERRIDABLE_KEYS).toContain("LLM_PROVIDER");
-    expect(OVERRIDABLE_KEYS).toContain("OLLAMA_MODEL");
+    expect(OVERRIDABLE_KEYS).toContain("OPENAI_MODEL");
     expect(OVERRIDABLE_KEYS).toContain("INGEST_BASE_URL");
   });
 });
 
 describe("resolveSettings", () => {
   it("falls back to the environment when nothing is overridden", () => {
-    const settings = resolveSettings({ OLLAMA_MODEL: "from-env" }, {});
+    const settings = resolveSettings({ OPENAI_MODEL: "from-env" }, {});
 
-    expect(settings.OLLAMA_MODEL).toBe("from-env");
+    expect(settings.OPENAI_MODEL).toBe("from-env");
   });
 
   it("lets a stored value win over the file", () => {
-    const settings = resolveSettings({ OLLAMA_MODEL: "from-env" }, { OLLAMA_MODEL: "from-db" });
+    const settings = resolveSettings({ OPENAI_MODEL: "from-env" }, { OPENAI_MODEL: "from-db" });
 
-    expect(settings.OLLAMA_MODEL).toBe("from-db");
+    expect(settings.OPENAI_MODEL).toBe("from-db");
   });
 
   it("applies the env schema's coercion to a value typed into the browser", () => {
@@ -52,13 +52,20 @@ describe("resolveSettings", () => {
 
   it("rejects a malformed URL the same way the file would", () => {
     // The point of reusing parseEnv: this rule is written once.
-    expect(() => resolveSettings({}, { OLLAMA_BASE_URL: "localhost:11434" })).toThrow(
-      /OLLAMA_BASE_URL/,
+    expect(() => resolveSettings({}, { OPENAI_BASE_URL: "localhost:11434" })).toThrow(
+      /OPENAI_BASE_URL/,
     );
   });
 
-  it("rejects a provider name that is not one of the three", () => {
+  it("rejects a provider name that is not one of the two", () => {
     expect(() => resolveSettings({}, { LLM_PROVIDER: "gpt5" })).toThrow(/LLM_PROVIDER/);
+  });
+
+  it("refuses anthropic from the web with no key configured, the same as the file would", () => {
+    expect(() => resolveSettings({}, { LLM_PROVIDER: "anthropic" })).toThrow(/ANTHROPIC_API_KEY/);
+    expect(() =>
+      resolveSettings({ ANTHROPIC_API_KEY: "sk-ant-test" }, { LLM_PROVIDER: "anthropic" }),
+    ).not.toThrow();
   });
 
   it("still enforces the cross-field rule that involves a secret it cannot set", () => {

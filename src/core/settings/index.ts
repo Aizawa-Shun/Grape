@@ -35,8 +35,6 @@ import { env, parseEnv, type Env } from "@/env";
 export const OVERRIDABLE_KEYS = [
   "LLM_PROVIDER",
   "ANTHROPIC_MODEL",
-  "OLLAMA_BASE_URL",
-  "OLLAMA_MODEL",
   "OPENAI_BASE_URL",
   "OPENAI_MODEL",
   "INGEST_BASE_URL",

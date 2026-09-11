@@ -54,7 +54,7 @@ describe("toAppError", () => {
     ] as const;
 
     for (const [failure, code] of cases) {
-      expect(toAppError(new LLMError("boom", "ollama", failure)).code).toBe(code);
+      expect(toAppError(new LLMError("boom", "anthropic", failure)).code).toBe(code);
     }
   });
 
@@ -90,7 +90,7 @@ describe("route", () => {
     const handler = route("test", async () => {
       throw new LLMError(
         `Model output for "diagnosis" was not valid JSON: ${rawModelOutput}`,
-        "ollama",
+        "anthropic",
         "bad_output",
       );
     });
@@ -154,7 +154,7 @@ describe("route", () => {
     });
 
     const handler = route("diagnose.run", async () => {
-      throw new LLMError("Ollama returned 500: out of memory", "ollama", "server_error");
+      throw new LLMError("Provider returned 500: out of memory", "anthropic", "server_error");
     });
     await handler(get(), undefined);
 

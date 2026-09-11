@@ -9,11 +9,11 @@ import { z } from "zod";
  * layer being an abstraction (spec §7).
  */
 
-export const LLM_PROVIDER_NAMES = ["anthropic", "ollama", "openai-compat"] as const;
+export const LLM_PROVIDER_NAMES = ["anthropic", "openai-compat"] as const;
 export type LLMProviderName = (typeof LLM_PROVIDER_NAMES)[number];
 
 /**
- * `z.url()` alone is not enough: `new URL("localhost:11434")` succeeds, with
+ * `z.url()` alone is not enough: `new URL("localhost:1234")` succeeds, with
  * protocol "localhost:" — exactly the typo this is meant to catch.
  */
 const httpUrl = (fallback: string) =>
@@ -44,14 +44,24 @@ const EnvSchema = z.object({
   DATABASE_AUTH_TOKEN: z.string().trim().optional(),
 
   // --- Intelligence layer -------------------------------------------------
-  LLM_PROVIDER: z.enum(LLM_PROVIDER_NAMES).default("anthropic"),
+  /**
+   * Unset by default — AI is opt-in, not a thing a fresh checkout is quietly
+   * running against. Product understanding without this configured falls
+   * back to the rule-based reading of the page itself (core/context/extract.ts);
+   * diagnosis, task recommendation and artifact generation simply refuse with
+   * a clear error until a provider is chosen (see LLM_NOT_CONFIGURED). Picking
+   * a value is not enough on its own either — the superRefine rules below
+   * still require that provider's own credentials to be set, so this can never
+   * be "on" without something behind it.
+   */
+  LLM_PROVIDER: z.enum(LLM_PROVIDER_NAMES).optional(),
 
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_MODEL: z.string().default("claude-opus-5"),
 
   /**
-   * Generous, because a 1.5B model on a CPU-only machine legitimately needs a
-   * minute to read a long prompt. The point is not to be strict — it is that
+   * Generous, because a slow or heavily-loaded endpoint legitimately needs a
+   * minute to answer a long prompt. The point is not to be strict — it is that
    * without any limit a stalled request holds a Node handle indefinitely and
    * the page just spins.
    */
@@ -67,9 +77,7 @@ const EnvSchema = z.object({
 
   /**
    * Ceiling on estimated spend per calendar month, in USD, across every LLM
-   * call. Ollama has no bill, so this only bites anthropic and openai-compat —
-   * but it stays a single global limit rather than one per provider, because
-   * switching providers mid-month must not reset an exhausted budget.
+   * call.
    *
    * Deliberately small by default: this targets someone with no marketing
    * budget, not someone who has already sized their AI spend. Raising it is
@@ -77,9 +85,6 @@ const EnvSchema = z.object({
    * something a $0-budget founder can undo.
    */
   LLM_MONTHLY_BUDGET_USD: z.coerce.number().positive().default(10),
-
-  OLLAMA_BASE_URL: httpUrl("http://localhost:11434"),
-  OLLAMA_MODEL: z.string().default("qwen2.5:1.5b-instruct"),
 
   OPENAI_BASE_URL: httpUrl("https://api.openai.com/v1"),
   OPENAI_API_KEY: z.string().optional(),
@@ -150,12 +155,22 @@ const EnvSchema = z.object({
 /**
  * Cross-field rules the per-field schema cannot express.
  *
- * Only one of these is fatal. A missing ANTHROPIC_API_KEY deliberately is not:
- * `ant auth login` is a legitimate way to be authenticated, and env cannot see
- * it, so refusing to boot would be wrong. A remote openai-compat endpoint with
- * no key, on the other hand, cannot possibly work.
+ * Picking a provider is deliberately not enough by itself to turn AI on: each
+ * provider must also have its own credential, so `LLM_PROVIDER` can never be
+ * "chosen" without something real behind it. `anthropic` always needs
+ * `ANTHROPIC_API_KEY` — there is no local, keyless Anthropic endpoint, unlike
+ * openai-compat's `localhost` exemption below, which exists because a
+ * self-hosted server (LM Studio, vLLM) genuinely has no key to give it.
  */
 const CheckedEnvSchema = EnvSchema.superRefine((value, ctx) => {
+  if (value.LLM_PROVIDER === "anthropic" && !value.ANTHROPIC_API_KEY) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["ANTHROPIC_API_KEY"],
+      message: "required when LLM_PROVIDER=anthropic",
+    });
+  }
+}).superRefine((value, ctx) => {
   if (value.LLM_PROVIDER !== "openai-compat") return;
   if (value.OPENAI_API_KEY) return;
 
@@ -183,6 +198,16 @@ const CheckedEnvSchema = EnvSchema.superRefine((value, ctx) => {
 });
 
 export type Env = z.infer<typeof EnvSchema>;
+
+/**
+ * The one place "is AI on" gets decided. `LLM_PROVIDER` being set is enough to
+ * ask this — the superRefine rules above already guarantee that a set
+ * provider has its own credential, so this never has to re-check
+ * ANTHROPIC_API_KEY / OPENAI_API_KEY itself.
+ */
+export function aiAvailable(settings: Pick<Env, "LLM_PROVIDER">): boolean {
+  return settings.LLM_PROVIDER !== undefined;
+}
 
 /**
  * Treat blank env vars as absent. `FOO=` in a .env file otherwise beats the

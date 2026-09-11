@@ -11,8 +11,9 @@ type JsonSchemaNode = Record<string, unknown>;
  *
  *   - OpenAI's `strict: true` json_schema mode *rejects* schemas that leave
  *     `additionalProperties` open or list optional properties.
- *   - Ollama compiles the schema into a decoding grammar; an open object lets
- *     a small model invent extra keys and wander.
+ *   - A self-hosted server compiling the schema into a decoding grammar (as
+ *     llama.cpp and vLLM both can) lets an open object invent extra keys and
+ *     wander — closing it keeps a small model on the rails.
  */
 export function toProviderJsonSchema(schema: ZodType<unknown>): JsonSchemaNode {
   return closeObjects(z.toJSONSchema(schema, { io: "output" }) as JsonSchemaNode);

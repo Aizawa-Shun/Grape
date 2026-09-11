@@ -8,8 +8,9 @@
 # the 51 database call sites, the 8 cascade deletes, or the migration history
 # that /api/health verifies.
 #
-# Two things are deliberately NOT set here and must be filled in on Render:
-# ANTHROPIC_API_KEY and DATABASE_AUTH_TOKEN (see `sync: false` below).
+# Left for Render to fill in (see `sync: false` below): DATABASE_AUTH_TOKEN is
+# required; LLM_PROVIDER and ANTHROPIC_API_KEY are optional — AI is opt-in, so
+# a deploy with neither set still works.
 
 services:
   - type: web
@@ -61,13 +62,14 @@ services:
       - key: DATABASE_AUTH_TOKEN
         sync: false
 
-      # Ollama runs on your own machine and does not exist here, so the local
-      # provider is not an option on this host.
+      # Both optional and left blank by default — AI is opt-in (see env.ts).
+      # A deploy with neither set still works: product understanding falls
+      # back to the rule-based reading of the page, and the AI-only features
+      # (diagnosis, task recommendation, artifact generation) simply refuse
+      # until both of these are filled in on Render. See the README's
+      # "AIを使えるようにする" for setting these after the first deploy.
       - key: LLM_PROVIDER
-        value: anthropic
-
-      # Entered on Render, never in this file. `ant auth login` is not a way to
-      # be authenticated on a server, so unlike locally, the key is required.
+        sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
 

@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { crawlSite } from "@/core/context/crawl";
 import { AppError } from "@/core/errors";
 import { extractProductContext } from "@/core/context/extract";
-import { getProvider } from "@/core/llm";
+import { getProvider, llmAvailable } from "@/core/llm";
 import { db, schema } from "@/db/client";
 import { normalizeUrl } from "@/core/context/crawl";
 
@@ -75,7 +75,11 @@ export async function registerProduct(input: {
       });
     }
 
-    const extraction = await extractProductContext(pages, getProvider());
+    // No AI configured is not a failure here — the rule-based reading inside
+    // extractProductContext is the actual product understanding on a Grape
+    // with no LLM_PROVIDER set, not an error state to refuse registration
+    // over.
+    const extraction = await extractProductContext(pages, llmAvailable() ? getProvider() : null);
 
     const version = await nextContextVersion(product.id);
     await db.insert(schema.productContexts).values({

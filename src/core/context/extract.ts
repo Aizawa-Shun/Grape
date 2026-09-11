@@ -18,6 +18,14 @@ import type { CrawledPage } from "./crawl";
  *      the model an explicit way to report a gap.
  *   2. The result is always reviewable and correctable by a human before it is
  *      used (see the `editedByHuman` flag on product_contexts).
+ *
+ * AI is opt-in (see env.ts's LLM_PROVIDER), so this cannot assume a model is
+ * ever available. The rule-based reading below — meta tags and headings,
+ * assembled without inventing anything — is the actual product on a Grape
+ * with no AI configured, not a degraded stand-in for one. Where a provider is
+ * configured, it is handed that same reading as a draft and asked to read the
+ * page and correct it, rather than starting from nothing: the rule-based pass
+ * already did the part that does not need judgment.
  */
 
 export const ProductContextExtractionSchema = z.object({
@@ -74,6 +82,11 @@ export type ProductContextExtraction = z.infer<typeof ProductContextExtractionSc
 const EXTRACTION_SYSTEM = `あなたはプロダクトアナリストです。個人開発者が作ったWebサービスについて、
 公開ページの内容だけを根拠に「What / Who / Why / How」を構造化して抽出します。
 
+入力には、サイト本文に加えて「機械的な下書き」が含まれます。下書きはmeta description
+などをそのまま並べただけの粗いもので、正しいとは限りません。本文を実際に読んで、
+下書きより正確に書けるならその通りに書き直してください。下書きの内容がすでに
+正確なら、そのまま採用して構いません。
+
 厳守すること:
 
 1. サイトに書かれていないことを補わない。一般的なSaaSの常識で埋めない。
@@ -120,7 +133,7 @@ export function hasEvidence(page: CrawledPage): boolean {
 }
 
 /** Renders crawled pages into the volatile half of the prompt. */
-export function buildExtractionInput(pages: CrawledPage[]): string {
+export function buildExtractionInput(pages: CrawledPage[], draft: ProductContextExtraction): string {
   const reachable = pages.filter(hasEvidence);
 
   if (pages.length === 0 || nothingReachable(pages)) {
@@ -156,32 +169,56 @@ export function buildExtractionInput(pages: CrawledPage[]): string {
         .join("\n")}`
     : "";
 
-  return `以下は対象サービスの公開ページです。\n\n${sections.join("\n\n---\n\n")}${notes}`;
+  const draftSection = `## 機械的な下書き（meta description等をそのまま並べたもの。不正確な場合があります）\n${JSON.stringify(draft, null, 2)}`;
+
+  return `以下は対象サービスの公開ページです。\n\n${sections.join("\n\n---\n\n")}${notes}\n\n---\n\n${draftSection}`;
 }
 
 /**
  * What an unstated field is written as, both by the model (per the system
- * prompt above) and by the no-evidence fallback below. Exported so callers
- * that need to tell "stated" from "unstated" — the site audit, in
- * particular — check against the same literal rather than a second copy of it.
+ * prompt above) and by the rule-based reading below. Exported so callers that
+ * need to tell "stated" from "unstated" — the site audit, in particular —
+ * check against the same literal rather than a second copy of it.
  */
 export const UNSTATED = "サイト上に明示なし";
 
 const NO_TEXT_NOTE =
   "取得したページに本文テキストが無かったため抽出できませんでした(クライアント側JavaScriptで描画されるサイトの可能性があります)。";
 
-export async function extractProductContext(
-  pages: CrawledPage[],
-  provider: LLMProvider,
-): Promise<ProductContextExtraction> {
-  // A page can be reachable (HTTP 200) and still carry nothing to reason over:
-  // a client-rendered app whose initial HTML is an empty `<div id="root">`,
-  // with no manifest or JSON-LD either, and with the browser fallback
-  // unavailable. Calling the LLM then would hand the model nothing but a
-  // domain name to extrapolate from — exactly the invention the system prompt
-  // forbids. Report the finding directly instead; it is itself diagnosable
-  // (spec §6), and the human can fill in Context by hand.
-  if (!pages.some(hasEvidence)) {
+const WHO_UNKNOWABLE_MECHANICALLY =
+  "誰のためのものかは、meta descriptionやタイトルからは機械的に判定できません。";
+const WHY_UNKNOWABLE_MECHANICALLY =
+  "なぜ必要とされるかは、meta descriptionやタイトルからは機械的に判定できません。";
+const HOW_UNKNOWABLE_MECHANICALLY =
+  "どう使うのかは、meta descriptionやタイトルからは機械的に判定できません。";
+
+/** First reachable page stands in for "the site's own account of itself" — normally the entry URL, since crawlSite visits it first. */
+function primaryPage(pages: CrawledPage[]): CrawledPage {
+  return pages[0];
+}
+
+function metaValue(page: CrawledPage, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = page.meta[key]?.trim();
+    if (value) return value;
+  }
+  return undefined;
+}
+
+/**
+ * The no-AI baseline, and the draft an AI extraction is asked to correct.
+ *
+ * Deliberately narrow: a title tag and a meta description say what a page
+ * *claims* to be, never who it is for or why they'd choose it over the
+ * alternative they already have — reading that out of a paragraph of body
+ * text is exactly the judgment call this function does not make. `who` and
+ * `why` are reported unstated on principle here, not because this particular
+ * site failed to say them; only `what` (and a thin `how`) come from what a
+ * page's own metadata already asserts about itself.
+ */
+export function buildRuleBasedContext(pages: CrawledPage[]): ProductContextExtraction {
+  const reachable = pages.filter(hasEvidence);
+  if (reachable.length === 0) {
     return {
       what: UNSTATED,
       who: UNSTATED,
@@ -194,12 +231,57 @@ export async function extractProductContext(
     };
   }
 
+  const page = primaryPage(reachable);
+  const name = metaValue(page, "og:site_name") ?? metaValue(page, "ld:name") ?? page.title?.trim();
+  const description = metaValue(page, "description", "og:description", "twitter:description", "ld:description");
+
+  const what = description
+    ? name && !description.includes(name)
+      ? `${name}。${description}`
+      : description
+    : UNSTATED;
+
+  const gaps = [WHO_UNKNOWABLE_MECHANICALLY, WHY_UNKNOWABLE_MECHANICALLY, HOW_UNKNOWABLE_MECHANICALLY];
+  if (!description) gaps.unshift("サイトに説明文（meta descriptionなど）が見つかりませんでした。");
+
+  return {
+    what,
+    who: UNSTATED,
+    why: UNSTATED,
+    how: UNSTATED,
+    primaryLanguage: metaValue(page, "html:lang", "manifest:lang") ?? "und",
+    evidenceUrls: description ? [page.url] : [],
+    gaps,
+    // Low on purpose: this is a metadata lookup, not a reading of the page —
+    // even a correct `what` here is a much thinner claim than the model
+    // extraction's confidence is meant to represent.
+    confidence: description ? 0.3 : 0,
+  };
+}
+
+export async function extractProductContext(
+  pages: CrawledPage[],
+  provider: LLMProvider | null,
+): Promise<ProductContextExtraction> {
+  // A page can be reachable (HTTP 200) and still carry nothing to reason over:
+  // a client-rendered app whose initial HTML is an empty `<div id="root">`,
+  // with no manifest or JSON-LD either, and with the browser fallback
+  // unavailable. Neither the rule-based reading nor a model has anything to
+  // work with then — report the finding directly; it is itself diagnosable
+  // (spec §6), and the human can fill in Context by hand.
+  if (!pages.some(hasEvidence)) {
+    return buildRuleBasedContext(pages);
+  }
+
+  const draft = buildRuleBasedContext(pages);
+  if (!provider) return draft;
+
   const { value } = await provider.completeStructured({
     kind: "extract",
     schemaName: "product_context",
     schema: ProductContextExtractionSchema,
     system: EXTRACTION_SYSTEM,
-    user: buildExtractionInput(pages),
+    user: buildExtractionInput(pages, draft),
   });
   return value;
 }

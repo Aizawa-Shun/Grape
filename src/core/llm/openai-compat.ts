@@ -22,13 +22,9 @@ interface ChatCompletionResponse {
 }
 
 /**
- * Any OpenAI-compatible /v1/chat/completions endpoint: OpenAI itself, LM
- * Studio, vLLM, llama.cpp's server, or Ollama's compatibility shim.
- *
- * Kept separate from OllamaProvider because the native Ollama API reports
- * different fields and takes the schema as `format` rather than
- * `response_format` — collapsing them would mean one adapter lying about the
- * other's behaviour.
+ * Any OpenAI-compatible /v1/chat/completions endpoint: OpenAI itself, or a
+ * self-hosted server (LM Studio, vLLM, llama.cpp's server) that speaks the
+ * same API.
  */
 export class OpenAICompatProvider implements LLMProvider {
   readonly name = "openai-compat";

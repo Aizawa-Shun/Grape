@@ -63,9 +63,13 @@ const CATALOG: Record<ErrorCode, Entry> = {
     text: "このURLは読み込めません。インターネットから見えるアドレスか、あなた自身の開発用サーバーを指定してください。",
   },
 
+  LLM_NOT_CONFIGURED: {
+    status: 503,
+    text: "AIが設定されていません。設定画面でAIの接続先とAPIキーを設定してください。",
+  },
   LLM_UNREACHABLE: {
     status: 503,
-    text: "AIに接続できませんでした。手元のモデルを使っている場合は、Ollama が起動しているか確認してください。",
+    text: "AIに接続できませんでした。しばらくしてからもう一度お試しください。",
   },
   LLM_TIMEOUT: {
     status: 504,

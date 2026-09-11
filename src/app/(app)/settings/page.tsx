@@ -91,6 +91,8 @@ export default async function SettingsPage({
         defaults={publicSettings(env)}
         overridden={Object.keys(overrides) as OverridableKey[]}
         monthSpendUsd={spentThisMonth}
+        hasAnthropicKey={Boolean(env.ANTHROPIC_API_KEY)}
+        hasOpenAIKey={Boolean(env.OPENAI_API_KEY)}
       />
 
       <div className="border-t border-border" />

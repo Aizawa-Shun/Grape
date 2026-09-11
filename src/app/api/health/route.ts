@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getProvider } from "@/core/llm";
+import { getProvider, llmAvailable } from "@/core/llm";
 import { dbReady, sqlClient } from "@/db/client";
 import { describeMigrationStatus, migrationStatus, readJournal } from "@/db/migration-status";
 import { loadSettings } from "@/core/settings";
@@ -36,9 +36,14 @@ export async function GET(request: Request) {
   // — not what .env happens to say underneath an override.
   const settings = await loadSettings();
   const database = await checkDatabase();
-  const llm = wantsLlm
-    ? await getProvider().health()
-    : { ok: true, provider: settings.LLM_PROVIDER, model: "(skipped)", detail: "skipped via ?llm=0" };
+  // AI being off is the configured, opt-in default (see env.ts) — not a
+  // failure this check should report as one, so this does not even attempt
+  // getProvider(), which would throw LLM_NOT_CONFIGURED.
+  const llm = !wantsLlm
+    ? { ok: true, provider: settings.LLM_PROVIDER, model: "(skipped)", detail: "skipped via ?llm=0" }
+    : !llmAvailable()
+      ? { ok: true, provider: "(none)", model: "(none)", detail: "AI is not configured (opt-in)" }
+      : await getProvider().health();
 
   const ok = database.ok && llm.ok;
 

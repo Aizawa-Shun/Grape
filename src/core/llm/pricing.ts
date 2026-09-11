@@ -39,20 +39,13 @@ const RATES: [prefix: string, rate: Rate][] = [
 ];
 
 /**
- * Ollama runs on the caller's own machine — there is no bill, so it is priced
- * at exactly zero rather than falling through to a nonzero default.
- */
-const OLLAMA_RATE: Rate = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-
-/**
  * Unrecognized model on a paid provider: price it as the most expensive known
  * rate rather than zero. A budget guard that under-counts an unknown model
  * fails open — exactly the failure mode this exists to prevent.
  */
 const FALLBACK_RATE: Rate = RATES[0][1];
 
-function rateFor(provider: string, model: string): Rate {
-  if (provider === "ollama") return OLLAMA_RATE;
+function rateFor(_provider: string, model: string): Rate {
   const match = RATES.find(([prefix]) => model.startsWith(prefix));
   return match ? match[1] : FALLBACK_RATE;
 }

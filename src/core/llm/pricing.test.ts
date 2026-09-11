@@ -8,15 +8,6 @@ function usage(overrides: Partial<Usage> = {}): Usage {
 }
 
 describe("estimateCostUsd", () => {
-  it("prices ollama at exactly zero regardless of the model string", () => {
-    const cost = estimateCostUsd(
-      "ollama",
-      "qwen2.5:1.5b-instruct",
-      usage({ inputTokens: 1_000_000, outputTokens: 1_000_000 }),
-    );
-    expect(cost).toBe(0);
-  });
-
   it("matches a known model by prefix", () => {
     const cost = estimateCostUsd("anthropic", "claude-opus-5-20260501", usage({ inputTokens: 1_000_000 }));
     expect(cost).toBeCloseTo(15, 5);

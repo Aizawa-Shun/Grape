@@ -34,7 +34,7 @@ describe("completeStructuredWithRepair", () => {
     const { chat, seen } = chatReturning(valid);
 
     const result = await completeStructuredWithRepair(chat, request(), {
-      provider: "ollama",
+      provider: "anthropic",
       maxAttempts: 2,
     });
 
@@ -46,7 +46,7 @@ describe("completeStructuredWithRepair", () => {
     const { chat, seen } = chatReturning("Sure! Here you go: {oops", valid);
 
     const result = await completeStructuredWithRepair(chat, request(), {
-      provider: "ollama",
+      provider: "anthropic",
       maxAttempts: 2,
     });
 
@@ -57,7 +57,7 @@ describe("completeStructuredWithRepair", () => {
   it("shows the model its own bad output and why it was rejected", async () => {
     const { chat, seen } = chatReturning("总之 not json at all", valid);
 
-    await completeStructuredWithRepair(chat, request(), { provider: "ollama", maxAttempts: 2 });
+    await completeStructuredWithRepair(chat, request(), { provider: "anthropic", maxAttempts: 2 });
 
     const retry = seen[1].user;
     expect(retry).toContain("总之 not json at all");
@@ -67,7 +67,7 @@ describe("completeStructuredWithRepair", () => {
   it("leaves the system prompt untouched, so prefix caching survives the retry", async () => {
     const { chat, seen } = chatReturning("nope", valid);
 
-    await completeStructuredWithRepair(chat, request(), { provider: "ollama", maxAttempts: 2 });
+    await completeStructuredWithRepair(chat, request(), { provider: "anthropic", maxAttempts: 2 });
 
     expect(seen[0].system).toBe(seen[1].system);
     expect(seen[1].user.startsWith(seen[0].user)).toBe(true);
@@ -77,7 +77,7 @@ describe("completeStructuredWithRepair", () => {
     const { chat, seen } = chatReturning("junk", "junk", "junk");
 
     await expect(
-      completeStructuredWithRepair(chat, request(), { provider: "ollama", maxAttempts: 2 }),
+      completeStructuredWithRepair(chat, request(), { provider: "anthropic", maxAttempts: 2 }),
     ).rejects.toMatchObject({ failure: "bad_output" });
 
     expect(seen).toHaveLength(2);
@@ -87,7 +87,7 @@ describe("completeStructuredWithRepair", () => {
     const { chat, seen } = chatReturning("junk", valid);
 
     await expect(
-      completeStructuredWithRepair(chat, request(), { provider: "ollama", maxAttempts: 1 }),
+      completeStructuredWithRepair(chat, request(), { provider: "anthropic", maxAttempts: 1 }),
     ).rejects.toBeInstanceOf(LLMError);
 
     expect(seen).toHaveLength(1);
@@ -97,7 +97,7 @@ describe("completeStructuredWithRepair", () => {
     const { chat, seen } = chatReturning(JSON.stringify({ summary: "ok" }), valid);
 
     const result = await completeStructuredWithRepair(chat, request(), {
-      provider: "ollama",
+      provider: "anthropic",
       maxAttempts: 2,
     });
 
@@ -116,7 +116,7 @@ describe("fetchModel", () => {
     await expect(
       fetchModel("http://localhost:11434/api/chat", {}, {
         timeoutMs: 10,
-        provider: "ollama",
+        provider: "anthropic",
         fetchImpl: hang,
       }),
     ).rejects.toMatchObject({ failure: "timeout" });
@@ -128,7 +128,7 @@ describe("fetchModel", () => {
     await expect(
       fetchModel("http://localhost:11434/api/chat", {}, {
         timeoutMs: 1000,
-        provider: "ollama",
+        provider: "anthropic",
         fetchImpl: refuse,
       }),
     ).rejects.toMatchObject({ failure: "unreachable" });
@@ -139,7 +139,7 @@ describe("fetchModel", () => {
 
     const response = await fetchModel("http://x/api", {}, {
       timeoutMs: 1000,
-      provider: "ollama",
+      provider: "anthropic",
       fetchImpl: ok,
     });
 
@@ -157,7 +157,7 @@ describe("fetchModel", () => {
       });
 
     await expect(
-      fetchModel("http://x/api", {}, { timeoutMs: 10, provider: "ollama", fetchImpl: hang }),
+      fetchModel("http://x/api", {}, { timeoutMs: 10, provider: "anthropic", fetchImpl: hang }),
     ).rejects.toBeInstanceOf(LLMError);
 
     expect(abortSeen).toHaveBeenCalled();

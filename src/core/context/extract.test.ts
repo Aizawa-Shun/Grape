@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { CrawledPage } from "./crawl";
-import { ProductContextExtractionSchema, buildExtractionInput, hasEvidence } from "./extract";
+import {
+  ProductContextExtractionSchema,
+  buildExtractionInput,
+  buildRuleBasedContext,
+  hasEvidence,
+} from "./extract";
 
 function page(overrides: Partial<CrawledPage> = {}): CrawledPage {
   return {
@@ -68,7 +73,7 @@ describe("hasEvidence", () => {
 
 describe("buildExtractionInput", () => {
   it("quotes machine-readable claims as evidence and hides the plumbing", () => {
-    const input = buildExtractionInput([
+    const pages = [
       page({
         text: "本文",
         meta: {
@@ -80,7 +85,8 @@ describe("buildExtractionInput", () => {
           "theme-color": "#000000",
         },
       }),
-    ]);
+    ];
+    const input = buildExtractionInput(pages, buildRuleBasedContext(pages));
 
     expect(input).toContain("manifest:description: オンラインチェスアプリ");
     expect(input).toContain("ld:name: Cheeeess");
@@ -90,15 +96,52 @@ describe("buildExtractionInput", () => {
   });
 
   it("includes a page that has no text but does have a manifest", () => {
-    const input = buildExtractionInput([page({ meta: { "manifest:name": "Cheeeess" } })]);
+    const pages = [page({ meta: { "manifest:name": "Cheeeess" } })];
+    const input = buildExtractionInput(pages, buildRuleBasedContext(pages));
 
     expect(input).toContain("manifest:name: Cheeeess");
     expect(input).not.toContain("取得できなかったページ");
   });
 
   it("throws only when nothing was reachable at all", () => {
-    expect(() => buildExtractionInput([page({ status: 0 }), page({ status: 404 })])).toThrow(
+    const pages = [page({ status: 0 }), page({ status: 404 })];
+    expect(() => buildExtractionInput(pages, buildRuleBasedContext(pages))).toThrow(
       /no pages could be reached/i,
     );
+  });
+});
+
+describe("buildRuleBasedContext", () => {
+  it("reads what from the page's own description, without asking who or why", () => {
+    const result = buildRuleBasedContext([
+      page({
+        title: "Cheeeess",
+        text: "本文",
+        meta: { description: "友達とブラウザでチェス対局ができるサービス", "html:lang": "ja" },
+      }),
+    ]);
+
+    expect(result.what).toContain("友達とブラウザでチェス対局ができるサービス");
+    expect(result.who).toBe("サイト上に明示なし");
+    expect(result.why).toBe("サイト上に明示なし");
+    expect(result.primaryLanguage).toBe("ja");
+    expect(result.confidence).toBeGreaterThan(0);
+    expect(result.confidence).toBeLessThan(1);
+  });
+
+  it("falls back to unstated everywhere when the site has no description at all", () => {
+    const result = buildRuleBasedContext([page({ title: "何もない", text: "本文だけ" })]);
+
+    expect(result.what).toBe("サイト上に明示なし");
+    expect(result.confidence).toBe(0);
+    expect(result.gaps.length).toBeGreaterThan(0);
+  });
+
+  it("returns the fully-unstated shape when no page has any evidence at all", () => {
+    const result = buildRuleBasedContext([page({ status: 404 })]);
+
+    expect(result.what).toBe("サイト上に明示なし");
+    expect(result.evidenceUrls).toEqual([]);
+    expect(result.confidence).toBe(0);
   });
 });

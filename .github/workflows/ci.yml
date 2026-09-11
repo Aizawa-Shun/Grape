@@ -19,9 +19,10 @@ jobs:
       # Every value here has a default in src/env.ts, but pinning them keeps CI
       # from silently depending on whatever the defaults happen to be.
       DATABASE_URL: file:./ci.db
-      # ollama needs no credentials. Nothing in this job actually calls a model —
-      # the provider is only constructed, never invoked.
-      LLM_PROVIDER: ollama
+      # AI is opt-in and both providers now need their own credential (see
+      # env.ts), so CI simply runs with none configured — nothing in this job
+      # calls a model, and the tests that exercise LLM-dependent code mock the
+      # provider directly rather than constructing a real one.
 
     steps:
       - uses: actions/checkout@v4

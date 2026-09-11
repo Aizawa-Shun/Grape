@@ -7,12 +7,26 @@ describe("parseEnv", () => {
     const env = parseEnv({});
 
     expect(env.DATABASE_URL).toBe("file:./grape.db");
-    expect(env.LLM_PROVIDER).toBe("anthropic");
+    expect(env.LLM_PROVIDER).toBeUndefined();
     expect(env.COLD_START_MIN_SESSIONS).toBe(30);
   });
 
   it("treats a blank value as absent rather than letting it beat the default", () => {
-    expect(parseEnv({ OLLAMA_MODEL: "   " }).OLLAMA_MODEL).toBe("qwen2.5:1.5b-instruct");
+    expect(parseEnv({ OPENAI_MODEL: "   " }).OPENAI_MODEL).toBe("gpt-4o-mini");
+  });
+
+  it("leaves AI off by default — a fresh checkout is not quietly running against a model", () => {
+    expect(parseEnv({}).LLM_PROVIDER).toBeUndefined();
+  });
+
+  it("refuses anthropic with no ANTHROPIC_API_KEY, since AI is opt-in, not opt-out", () => {
+    expect(() => parseEnv({ LLM_PROVIDER: "anthropic" })).toThrow(/ANTHROPIC_API_KEY/);
+  });
+
+  it("allows anthropic once ANTHROPIC_API_KEY is set", () => {
+    expect(() =>
+      parseEnv({ LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-ant-test" }),
+    ).not.toThrow();
   });
 
   /**
@@ -40,7 +54,7 @@ describe("parseEnv", () => {
   });
 
   it("rejects a malformed URL at boot instead of at the first request", () => {
-    expect(() => parseEnv({ OLLAMA_BASE_URL: "localhost:11434" })).toThrow(/OLLAMA_BASE_URL/);
+    expect(() => parseEnv({ OPENAI_BASE_URL: "localhost:1234" })).toThrow(/OPENAI_BASE_URL/);
   });
 
   it("keeps dry run on unless the value is exactly false", () => {
@@ -65,10 +79,6 @@ describe("parseEnv", () => {
     });
 
     expect(env.OPENAI_API_KEY).toBeUndefined();
-  });
-
-  it("does not require ANTHROPIC_API_KEY, since `ant auth login` is invisible to env", () => {
-    expect(() => parseEnv({ LLM_PROVIDER: "anthropic" })).not.toThrow();
   });
 
   it("allows neither GOOGLE_CLIENT_ID nor GOOGLE_CLIENT_SECRET, the ordinary no-Google-login case", () => {

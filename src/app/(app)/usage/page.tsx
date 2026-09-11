@@ -151,8 +151,7 @@ export default async function UsagePage() {
       )}
 
       <Callout>
-        Ollamaを使った分は含まれません（手元で動くので費用が発生しません）。金額は
-        core/llm/pricing.ts の定価表による見積りで、実際の請求とは差が出ます。
+        金額は core/llm/pricing.ts の定価表による見積りで、実際の請求とは差が出ます。
       </Callout>
     </Page>
   );
