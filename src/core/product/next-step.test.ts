@@ -21,7 +21,7 @@ function task(overrides: Partial<TaskSnapshot> = {}): TaskSnapshot {
 
 function snapshot(overrides: Partial<ProductSnapshot> = {}): ProductSnapshot {
   return {
-    product: { id: "p1", name: "Chess", url: "https://chess.example" },
+    product: { id: "p1", name: "Chess", url: "https://chess.example", setupStatus: "ready" as const },
     keyEventName: "signup",
     eventCount: 100,
     contextEditedByHuman: true,
@@ -135,9 +135,9 @@ describe("pickNextStep", () => {
   });
 
   it("picks the most urgent product across all of them, not the first", () => {
-    const quiet = snapshot({ product: { id: "p1", name: "Quiet", url: "https://a.example" } });
+    const quiet = snapshot({ product: { id: "p1", name: "Quiet", url: "https://a.example", setupStatus: "ready" as const } });
     const urgent = snapshot({
-      product: { id: "p2", name: "Urgent", url: "https://b.example" },
+      product: { id: "p2", name: "Urgent", url: "https://b.example", setupStatus: "ready" as const },
       tasks: [task({ hasArtifact: true })],
     });
 
@@ -147,8 +147,8 @@ describe("pickNextStep", () => {
   });
 
   it("keeps registration order when two products want the same thing", () => {
-    const first = snapshot({ product: { id: "p1", name: "First", url: "https://a.example" } });
-    const second = snapshot({ product: { id: "p2", name: "Second", url: "https://b.example" } });
+    const first = snapshot({ product: { id: "p1", name: "First", url: "https://a.example", setupStatus: "ready" as const } });
+    const second = snapshot({ product: { id: "p2", name: "Second", url: "https://b.example", setupStatus: "ready" as const } });
 
     expect(pickNextStep([first, second], NOW)).toMatchObject({ product: { id: "p1" } });
   });

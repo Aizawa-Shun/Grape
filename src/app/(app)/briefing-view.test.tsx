@@ -5,7 +5,7 @@ import type { Briefing } from "@/core/product/briefing";
 
 import { BriefingView } from "./briefing-view";
 
-const product = { id: "p1", name: "Chess", url: "https://chess.example" };
+const product = { id: "p1", name: "Chess", url: "https://chess.example", setupStatus: "ready" as const };
 
 function briefing(overrides: Partial<Briefing> = {}): Briefing {
   return {

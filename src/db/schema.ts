@@ -117,6 +117,18 @@ export const invites = sqliteTable(
 
 // --- ① PRODUCT --------------------------------------------------------------
 
+/**
+ * How far the crawl-and-read pass has got.
+ *
+ * Registration used to hold the browser open for the whole thing — five page
+ * fetches, a headless render, and on the AI path a model call — and closing
+ * the tab lost the lot. The work now outlives the request that asked for it,
+ * which means the row has to say where it is up to, because nothing else can:
+ * the reader is already looking at the page by the time any of it happens.
+ */
+export const PRODUCT_SETUP_STATUSES = ["pending", "ready", "failed"] as const;
+export type ProductSetupStatus = (typeof PRODUCT_SETUP_STATUSES)[number];
+
 export const products = sqliteTable(
   "products",
   {
@@ -131,6 +143,19 @@ export const products = sqliteTable(
      * compute activate.
      */
     keyEventName: text("key_event_name"),
+    /**
+     * Defaults to "ready" so every row that predates background setup — all of
+     * which were written only after their crawl had already finished — reads
+     * as what it is, rather than as permanently pending.
+     */
+    setupStatus: text("setup_status", { enum: PRODUCT_SETUP_STATUSES }).notNull().default("ready"),
+    /**
+     * Why the last attempt failed, in the words the reader gets. Kept after a
+     * later success too: a product whose re-crawl failed still has its earlier
+     * context, and the page says so rather than silently showing stale work as
+     * current.
+     */
+    setupError: text("setup_error"),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("products_user_url_idx").on(t.userId, t.url)],

@@ -22,7 +22,7 @@ function task(overrides: Partial<TaskSnapshot> = {}): TaskSnapshot {
 
 function snapshot(overrides: Partial<ProductSnapshot> = {}): ProductSnapshot {
   return {
-    product: { id: "p1", name: "Chess", url: "https://chess.example" },
+    product: { id: "p1", name: "Chess", url: "https://chess.example", setupStatus: "ready" as const },
     keyEventName: "signup",
     eventCount: 100,
     contextEditedByHuman: true,
@@ -140,11 +140,11 @@ describe("buildBriefing — celebrating", () => {
 describe("buildBriefing — coherence", () => {
   it("describes the same product the suggestion is about, not a different one", () => {
     const quiet = snapshot({
-      product: { id: "p1", name: "Quiet", url: "https://a.example" },
+      product: { id: "p1", name: "Quiet", url: "https://a.example", setupStatus: "ready" as const },
       latestDiagnosisMode: "audit",
     });
     const urgent = snapshot({
-      product: { id: "p2", name: "Urgent", url: "https://b.example" },
+      product: { id: "p2", name: "Urgent", url: "https://b.example", setupStatus: "ready" as const },
       latestDiagnosisMode: "funnel",
       latestBottleneckStage: "activate",
       tasks: [task({ hasArtifact: true })],

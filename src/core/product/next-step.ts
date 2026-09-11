@@ -25,6 +25,8 @@ export interface StepProduct {
   id: string;
   name: string;
   url: string;
+  /** So the dashboard can say "still reading" instead of "not diagnosed yet" — see schema.ts. */
+  setupStatus: schema.ProductSetupStatus;
 }
 
 export interface StepTask {
@@ -225,7 +227,12 @@ export async function loadSnapshots(
       );
 
       return {
-        product: { id: product.id, name: product.name, url: product.url },
+        product: {
+          id: product.id,
+          name: product.name,
+          url: product.url,
+          setupStatus: product.setupStatus,
+        },
         keyEventName: product.keyEventName,
         eventCount: Number(events?.n ?? 0),
         contextEditedByHuman: context ? context.editedByHuman : null,

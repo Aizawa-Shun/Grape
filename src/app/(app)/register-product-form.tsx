@@ -8,9 +8,11 @@ import { controlClass } from "@/components/ui/field";
 import { Status } from "@/components/ui/status";
 
 /**
- * Registration is synchronous — reading the site and working out what it is
- * takes seconds on the API and can take minutes on a local model — so this
- * form has to show its own progress rather than relying on a page transition.
+ * Submitting only creates the row; reading the site happens afterwards, on the
+ * server, whether or not this page is still open (see api/products/route.ts).
+ * So this form no longer waits for any of that — it hands over to the product
+ * page as soon as there is a product page to hand over to, and the progress
+ * that used to live here lives there instead, where it survives a reload.
  */
 export function RegisterProductForm() {
   const router = useRouter();
@@ -53,15 +55,10 @@ export function RegisterProductForm() {
           className={controlClass}
         />
         <Button type="submit" variant="primary" loading={pending} className="sm:shrink-0">
-          {pending ? "読み込み中…" : "追加する"}
+          {pending ? "追加しています…" : "追加する"}
         </Button>
       </div>
 
-      {pending && (
-        <Status>
-          サイトを読んで、何のサービスかを整理しています。手元のモデルを使っている場合は数分かかることがあります。
-        </Status>
-      )}
       {error && <Status tone="error">{error}</Status>}
     </form>
   );

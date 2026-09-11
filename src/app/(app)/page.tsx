@@ -59,7 +59,14 @@ export default async function DashboardPage() {
                       <span className="truncate text-text-muted">{snapshot.product.url}</span>
                     </span>
                     <span className="flex shrink-0 items-center gap-2">
-                      {diagnosis ? (
+                      {/* Setup state first: a product still being read has
+                          nothing to diagnose yet, and one that failed to read
+                          needs attention before its diagnosis does. */}
+                      {snapshot.product.setupStatus === "pending" ? (
+                        <span className="text-xs text-text-muted">読み込み中…</span>
+                      ) : snapshot.product.setupStatus === "failed" ? (
+                        <Badge tone="attention">読み込めませんでした</Badge>
+                      ) : diagnosis ? (
                         <Badge tone="attention">
                           {STAGE_UI[diagnosis.bottleneckStage].label}で詰まっています
                         </Badge>

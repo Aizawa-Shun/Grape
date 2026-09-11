@@ -75,49 +75,93 @@ const FAKE_EXTRACTION = {
   confidence: 0.8,
 };
 
-describe("registerProduct", () => {
+async function register(url: string) {
+  const { runProductSetup, startProductSetup } = await import("./register");
+  const started = await startProductSetup({ url, userId });
+  await runProductSetup(started);
+  return started;
+}
+
+describe("startProductSetup", () => {
   /**
-   * The bug this whole file exists to pin down: a crawl or extraction failure
-   * used to leave a product row behind with no context and no crawl pages —
-   * unremovable from the UI before DeleteProductButton existed, and confusing
-   * even after, since it looks identical to "still being set up".
+   * The whole point of the split: this half must not touch the network, so the
+   * POST behind it can answer before any of the slow work begins.
    */
-  it("undoes a brand-new product when the crawl fails", async () => {
+  it("creates the row as pending without reading the site", async () => {
+    const { startProductSetup } = await import("./register");
+
+    const started = await startProductSetup({ url: "https://example.com", userId });
+
+    expect(crawlSite).not.toHaveBeenCalled();
+    const [row] = await db.query.products.findMany();
+    expect(row.id).toBe(started.productId);
+    expect(row.setupStatus).toBe("pending");
+  });
+
+  /** A second attempt is a fresh one — whatever the last failure said no longer applies. */
+  it("puts an already-failed product back to pending when it is registered again", async () => {
     crawlSite.mockRejectedValue(new Error("DNS lookup failed"));
-    const { registerProduct } = await import("./register");
+    const first = await register("https://example.com");
+    expect((await db.query.products.findFirst())?.setupStatus).toBe("failed");
 
-    await expect(
-      registerProduct({ url: "https://nope.example.com", userId }),
-    ).rejects.toThrow("DNS lookup failed");
+    const { startProductSetup } = await import("./register");
+    const again = await startProductSetup({ url: "https://example.com", userId });
 
-    const rows = await db.query.products.findMany();
-    expect(rows).toHaveLength(0);
+    expect(again.productId).toBe(first.productId);
+    const row = await db.query.products.findFirst();
+    expect(row?.setupStatus).toBe("pending");
+    expect(row?.setupError).toBeNull();
   });
+});
 
-  it("undoes a brand-new product when extraction fails", async () => {
-    crawlSite.mockResolvedValue([FAKE_PAGE]);
-    extractProductContext.mockRejectedValue(new Error("model unavailable"));
-    const { registerProduct } = await import("./register");
-
-    await expect(
-      registerProduct({ url: "https://example.com", userId }),
-    ).rejects.toThrow("model unavailable");
-
-    expect(await db.query.products.findMany()).toHaveLength(0);
-  });
-
-  it("keeps a product that registered successfully", async () => {
+describe("runProductSetup", () => {
+  it("records the context and marks the product ready", async () => {
     crawlSite.mockResolvedValue([FAKE_PAGE]);
     extractProductContext.mockResolvedValue(FAKE_EXTRACTION);
-    const { registerProduct } = await import("./register");
 
-    const result = await registerProduct({ url: "https://example.com", userId });
+    const { productId } = await register("https://example.com");
 
-    expect(await db.query.products.findMany()).toHaveLength(1);
+    expect((await db.query.products.findFirst())?.setupStatus).toBe("ready");
     const context = await db.query.productContexts.findFirst({
-      where: eq(schema.productContexts.productId, result.productId),
+      where: eq(schema.productContexts.productId, productId),
     });
     expect(context?.what).toBe("what");
+  });
+
+  /**
+   * Nothing is awaiting this, so a thrown error would go nowhere at all — the
+   * row is the only place a failure can still be seen from.
+   */
+  it("records a crawl failure on the row instead of throwing", async () => {
+    crawlSite.mockRejectedValue(new Error("DNS lookup failed"));
+
+    await expect(register("https://nope.example.com")).resolves.toBeDefined();
+
+    const row = await db.query.products.findFirst();
+    expect(row?.setupStatus).toBe("failed");
+    expect(row?.setupError).toBeTruthy();
+  });
+
+  it("records an extraction failure the same way", async () => {
+    crawlSite.mockResolvedValue([FAKE_PAGE]);
+    extractProductContext.mockRejectedValue(new Error("model unavailable"));
+
+    await register("https://example.com");
+
+    expect((await db.query.products.findFirst())?.setupStatus).toBe("failed");
+  });
+
+  /**
+   * The row used to be deleted on a failed first crawl. It cannot be any more:
+   * the reader is already on its page by the time this runs, and deleting it
+   * turns a failure they could act on into a 404 they cannot.
+   */
+  it("leaves a failed product in place, so its page can explain itself", async () => {
+    crawlSite.mockRejectedValue(new Error("DNS lookup failed"));
+
+    await register("https://nope.example.com");
+
+    expect(await db.query.products.findMany()).toHaveLength(1);
   });
 
   /**
@@ -125,20 +169,19 @@ describe("registerProduct", () => {
    * A failed re-crawl must not cost the owner the working context a previous,
    * successful run already produced.
    */
-  it("keeps an existing product and its prior context when a re-crawl fails", async () => {
+  it("keeps the prior context when a re-crawl fails", async () => {
     crawlSite.mockResolvedValue([FAKE_PAGE]);
     extractProductContext.mockResolvedValue(FAKE_EXTRACTION);
-    const { registerProduct } = await import("./register");
-    const first = await registerProduct({ url: "https://example.com", userId });
+    const first = await register("https://example.com");
 
     crawlSite.mockRejectedValue(new Error("timed out"));
-    await expect(registerProduct({ url: "https://example.com", userId })).rejects.toThrow(
-      "timed out",
-    );
+    await register("https://example.com");
 
     const rows = await db.query.products.findMany();
     expect(rows).toHaveLength(1);
     expect(rows[0]?.id).toBe(first.productId);
+    expect(rows[0]?.setupStatus).toBe("failed");
+
     const context = await db.query.productContexts.findFirst({
       where: eq(schema.productContexts.productId, first.productId),
     });
