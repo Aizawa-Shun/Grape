@@ -29,6 +29,7 @@ const context: ProductContext = {
   sourcePages: ["https://example.com/pricing", "https://example.com/"],
   confidence: 0.8,
   gaps: [],
+  analysis: null,
   primaryLanguage: "ja",
   editedByHuman: false,
   createdAt: new Date("2026-01-02T00:00:00Z"),

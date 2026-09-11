@@ -169,6 +169,40 @@ describe("parseHtml", () => {
     expect(divsOnly.sections[0].body).toContain("An 8×16 board.");
   });
 
+  /**
+   * What a page asks its reader to do is the most direct statement of its
+   * business model on it — "Start free trial" and "Contact sales" describe two
+   * different companies — and it is exactly what a body-text dump flattens away.
+   */
+  it("collects button and CTA labels, ignoring ordinary nav links", () => {
+    const withCtas = parseHtml(
+      `<body>
+        <a href="/about">About</a>
+        <button>無料で始める</button>
+        <a href="/demo" class="btn-primary">デモを見る</a>
+        <input type="submit" value="送信">
+      </body>`,
+      "https://example.com/",
+      20_000,
+    );
+
+    // Document order, not selector order: the first button on the page is the
+    // one it most wants pressed.
+    expect(withCtas.ctas).toEqual(["無料で始める", "デモを見る", "送信"]);
+    expect(withCtas.ctas).not.toContain("About");
+  });
+
+  it("pulls out price-shaped strings, which a thousand-word page buries", () => {
+    const withPrices = parseHtml(
+      `<body><p>Free forever, or $9/mo per user. 年額 12,000円 のプランもあります。</p></body>`,
+      "https://example.com/",
+      20_000,
+    );
+
+    expect(withPrices.prices).toContain("$9/mo");
+    expect(withPrices.prices).toContain("12,000円");
+  });
+
   it("prefers real headings over the line-shape guess when both are available", () => {
     const both = parseHtml(
       `<body>

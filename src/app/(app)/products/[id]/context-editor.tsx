@@ -8,12 +8,18 @@ import { Callout } from "@/components/ui/callout";
 import { Field, controlClass } from "@/components/ui/field";
 import { Status } from "@/components/ui/status";
 import type { ContextEditInput } from "@/core/context/edit";
+import { UNSTATED } from "@/core/context/unstated";
 
 interface Props {
   productId: string;
   initial: ContextEditInput;
-  gaps: string[];
   editedByHuman: boolean;
+  /**
+   * Suppresses the "not yet checked by you" notice. Set when this sits under a
+   * full analysis report, which already says it was written by AI — repeating
+   * it at the bottom of the same page reads as a second, different warning.
+   */
+  quiet?: boolean;
 }
 
 /**
@@ -32,7 +38,7 @@ const FIELDS: { key: keyof ContextEditInput; label: string; hint: string }[] = [
   { key: "how", label: "どうやって使うのか", hint: "使う人は何をすることになりますか。" },
 ];
 
-export function ContextEditor({ productId, initial, gaps, editedByHuman }: Props) {
+export function ContextEditor({ productId, initial, editedByHuman, quiet = false }: Props) {
   const router = useRouter();
   const [values, setValues] = useState<ContextEditInput>(initial);
   const [editing, setEditing] = useState(false);
@@ -62,20 +68,10 @@ export function ContextEditor({ productId, initial, gaps, editedByHuman }: Props
 
   return (
     <div className="flex flex-col gap-5">
-      {!editedByHuman && (
+      {!editedByHuman && !quiet && (
         <Callout tone="attention">
           これはサイトを読んで自動で書いたもので、まだあなたの確認を受けていません。
           この内容をもとに診断も提案も作られるので、違っていたら直してください。
-        </Callout>
-      )}
-
-      {gaps.length > 0 && (
-        <Callout title="サイトに書かれていなかったこと">
-          <ul className="list-inside list-disc">
-            {gaps.map((gap) => (
-              <li key={gap}>{gap}</li>
-            ))}
-          </ul>
         </Callout>
       )}
 
@@ -110,7 +106,20 @@ export function ContextEditor({ productId, initial, gaps, editedByHuman }: Props
               className="grid gap-0.5 px-4 py-3 sm:grid-cols-[9.5rem_1fr] sm:gap-4"
             >
               <dt className="text-sm text-text-muted">{field.label}</dt>
-              <dd className="whitespace-pre-wrap text-sm">{values[field.key]}</dd>
+              {/*
+                A field the site never stated shows as a short "未確認" rather
+                than the sentinel sentence it is stored as. The sentinel has to
+                stay in the data — site audit compares against it by string
+                equality — but there is no reason to make a reader read
+                "サイト上に明示なし" four times down one table.
+              */}
+              <dd className="whitespace-pre-wrap text-sm">
+                {values[field.key] === UNSTATED ? (
+                  <span className="text-text-subtle">未確認</span>
+                ) : (
+                  values[field.key]
+                )}
+              </dd>
             </div>
           ))}
         </dl>

@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { Callout } from "@/components/ui/callout";
 import { Page, PageHeader, Section } from "@/components/ui/page";
 
+import { AnalysisReport } from "./analysis-report";
 import { ContextEditor } from "./context-editor";
 import { DeleteProductButton } from "./delete-product-button";
 import { SetupProgress } from "./setup-progress";
@@ -83,33 +84,63 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
         </Callout>
       )}
 
-      <Section
-        title="このサービスについて"
-        actions={
-          latest && (
+      {product.setupStatus === "pending" && !latest && (
+        <Section title="このサービスについて">
+          <SetupProgress url={product.url} />
+        </Section>
+      )}
+
+      {product.setupStatus === "pending" && latest && (
+        <SetupProgress url={product.url} compact />
+      )}
+
+      {/*
+        The analysis is the page when there is one, and the four-field editor
+        is what remains when there is not — a context written before analyses
+        existed, corrected by hand, or read without a model configured. Both
+        render the same underlying row; only one of them is a report.
+      */}
+      {latest?.analysis && !latest.editedByHuman ? (
+        <AnalysisReport analysis={latest.analysis} />
+      ) : latest ? (
+        <Section
+          title="このサービスについて"
+          actions={
             <span className="text-xs text-text-muted">
               {versions.length}回目の内容
               {latest.editedByHuman ? "（あなたが修正）" : "（自動で作成）"}
             </span>
-          )
-        }
-      >
-        {product.setupStatus === "pending" && !latest ? (
-          <SetupProgress url={product.url} />
-        ) : latest ? (
-          <div className="flex flex-col gap-3">
-            {product.setupStatus === "pending" && <SetupProgress url={product.url} compact />}
-            <ContextEditor
-              productId={id}
-              initial={{ what: latest.what, who: latest.who, why: latest.why, how: latest.how }}
-              gaps={latest.gaps}
-              editedByHuman={latest.editedByHuman}
-            />
-          </div>
-        ) : (
+          }
+        >
+          <ContextEditor
+            productId={id}
+            initial={{ what: latest.what, who: latest.who, why: latest.why, how: latest.how }}
+            editedByHuman={latest.editedByHuman}
+          />
+        </Section>
+      ) : product.setupStatus === "pending" ? null : (
+        <Section title="このサービスについて">
           <p className="text-sm text-text-muted">まだ内容がありません。</p>
-        )}
-      </Section>
+        </Section>
+      )}
+
+      {/*
+        Present under the report too, so an analysis the reader disagrees with
+        is one click from being corrected rather than only re-runnable.
+      */}
+      {latest?.analysis && !latest.editedByHuman && (
+        <Section
+          title="内容を直す"
+          description="AIの読み取りが違っていたら、ここで直せます。直した内容が診断と提案に使われます。"
+        >
+          <ContextEditor
+            productId={id}
+            initial={{ what: latest.what, who: latest.who, why: latest.why, how: latest.how }}
+            editedByHuman={latest.editedByHuman}
+            quiet
+          />
+        </Section>
+      )}
 
       {/* Nothing to list until the crawl has written its first page, and an
           empty "読み取ったページ（0）" during setup reads as a result. */}
@@ -119,15 +150,26 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
           {pages.map((page) => (
             <li key={page.id} className="flex flex-col gap-1 px-3 py-2">
               <div className="flex items-center justify-between gap-2">
-                <span className="truncate">{page.url}</span>
-                <span
-                  className={
-                    page.status === 200
-                      ? "shrink-0 text-xs text-text-muted"
-                      : "shrink-0 text-xs text-negative"
-                  }
-                >
-                  {page.status === 200 ? "読めました" : "読めませんでした"}
+                <span className="flex min-w-0 flex-col">
+                  {page.title && <span className="truncate font-medium">{page.title}</span>}
+                  <span className="truncate text-xs text-text-muted">{page.url}</span>
+                </span>
+                <span className="flex shrink-0 flex-col items-end gap-0.5">
+                  <span className={page.status === 200 ? "text-xs text-text-muted" : "text-xs text-negative"}>
+                    {page.status === 200 ? "読めました" : "読めませんでした"}
+                  </span>
+                  <time dateTime={page.fetchedAt.toISOString()} className="text-xs text-text-subtle">
+                    {page.fetchedAt.toLocaleString("ja-JP", {
+                      // Fixed to Asia/Tokyo rather than the server's zone: this
+                      // renders on the server, so "local time" would be the
+                      // deployment's, not the reader's.
+                      timeZone: "Asia/Tokyo",
+                      month: "numeric",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </time>
                 </span>
               </div>
               {page.renderedWith === "browser" && (

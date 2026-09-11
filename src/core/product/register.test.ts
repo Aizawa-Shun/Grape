@@ -36,7 +36,13 @@ vi.mock("@/core/context/extract", () => ({
   extractProductContext: (...args: unknown[]) => extractProductContext(...args),
 }));
 
-vi.mock("@/core/llm", () => ({ getProvider: () => ({}), llmAvailable: () => true }));
+const analyzeSaas = vi.fn();
+vi.mock("@/core/context/analyze", () => ({
+  analyzeSaas: (...args: unknown[]) => analyzeSaas(...args),
+}));
+
+const llmAvailable = vi.fn(() => true);
+vi.mock("@/core/llm", () => ({ getProvider: () => ({}), llmAvailable: () => llmAvailable() }));
 
 let userId: string;
 
@@ -61,6 +67,8 @@ beforeEach(async () => {
 
   crawlSite.mockReset();
   extractProductContext.mockReset();
+  analyzeSaas.mockReset();
+  llmAvailable.mockReturnValue(true);
 });
 
 const FAKE_PAGE = { url: "https://example.com/", status: 200, title: "Example", text: "hello", meta: {} };
@@ -74,6 +82,41 @@ const FAKE_EXTRACTION = {
   gaps: [],
   confidence: 0.8,
 };
+
+/** Only the parts contextFromAnalysis reads; the rest of the shape is exercised in derive.test.ts. */
+function fakeAnalysis() {
+  const text = (value: string) => ({ value, status: "confirmed" as const });
+  const list = (items: string[]) => ({ items, status: "confirmed" as const });
+
+  return {
+    overview: { oneLiner: "一言", description: "説明", category: "Gaming" },
+    service: {
+      what: text("分析されたwhat"),
+      who: text("分析されたwho"),
+      problems: list(["課題"]),
+      valueProposition: list(["価値"]),
+      features: list(["機能"]),
+      usage: text("使い方"),
+    },
+    targetUsers: { primary: ["主"], secondary: [], status: "inferred" as const },
+    business: {
+      pricing: text("無料"),
+      model: text("フリーミアム"),
+      audienceType: text("B2C"),
+      revenueSource: text("広告"),
+    },
+    market: {
+      category: text("ゲーム"),
+      industry: text("ゲーム"),
+      similarServices: list(["chess.com"]),
+    },
+    insights: { strengths: [], differentiation: [], userNeeds: [], opportunities: [] },
+    evidence: [
+      { topic: "service.what", url: "https://example.com/", quote: "q", reasoning: "r" },
+    ],
+    primaryLanguage: "ja",
+  };
+}
 
 async function register(url: string) {
   const { runProductSetup, startProductSetup } = await import("./register");
@@ -117,7 +160,7 @@ describe("startProductSetup", () => {
 describe("runProductSetup", () => {
   it("records the context and marks the product ready", async () => {
     crawlSite.mockResolvedValue([FAKE_PAGE]);
-    extractProductContext.mockResolvedValue(FAKE_EXTRACTION);
+    analyzeSaas.mockResolvedValue(fakeAnalysis());
 
     const { productId } = await register("https://example.com");
 
@@ -125,7 +168,7 @@ describe("runProductSetup", () => {
     const context = await db.query.productContexts.findFirst({
       where: eq(schema.productContexts.productId, productId),
     });
-    expect(context?.what).toBe("what");
+    expect(context?.what).toBe("分析されたwhat");
   });
 
   /**
@@ -142,13 +185,50 @@ describe("runProductSetup", () => {
     expect(row?.setupError).toBeTruthy();
   });
 
-  it("records an extraction failure the same way", async () => {
+  it("stores the analysis alongside the context it was derived from", async () => {
     crawlSite.mockResolvedValue([FAKE_PAGE]);
-    extractProductContext.mockRejectedValue(new Error("model unavailable"));
+    analyzeSaas.mockResolvedValue(fakeAnalysis());
+
+    const { productId } = await register("https://example.com");
+
+    const context = await db.query.productContexts.findFirst({
+      where: eq(schema.productContexts.productId, productId),
+    });
+    expect(context?.analysis?.overview.oneLiner).toBe("一言");
+    // The four fields stay authoritative for every prompt downstream, derived
+    // from the analysis rather than asked for separately.
+    expect(context?.who).toBe("分析されたwho");
+  });
+
+  /**
+   * A model that fails is worth falling back from, not failing the whole
+   * registration over: a rule-based context is worth more than an error page,
+   * and re-registering once the model is reachable costs one click.
+   */
+  it("falls back to the rule-based reading when the analysis call fails", async () => {
+    crawlSite.mockResolvedValue([FAKE_PAGE]);
+    analyzeSaas.mockRejectedValue(new Error("model unavailable"));
+    extractProductContext.mockResolvedValue(FAKE_EXTRACTION);
+
+    const { productId } = await register("https://example.com");
+
+    expect((await db.query.products.findFirst())?.setupStatus).toBe("ready");
+    const context = await db.query.productContexts.findFirst({
+      where: eq(schema.productContexts.productId, productId),
+    });
+    expect(context?.what).toBe("what");
+    expect(context?.analysis).toBeNull();
+  });
+
+  it("never calls the model at all when no provider is configured", async () => {
+    llmAvailable.mockReturnValue(false);
+    crawlSite.mockResolvedValue([FAKE_PAGE]);
+    extractProductContext.mockResolvedValue(FAKE_EXTRACTION);
 
     await register("https://example.com");
 
-    expect((await db.query.products.findFirst())?.setupStatus).toBe("failed");
+    expect(analyzeSaas).not.toHaveBeenCalled();
+    expect((await db.query.products.findFirst())?.setupStatus).toBe("ready");
   });
 
   /**
@@ -171,7 +251,7 @@ describe("runProductSetup", () => {
    */
   it("keeps the prior context when a re-crawl fails", async () => {
     crawlSite.mockResolvedValue([FAKE_PAGE]);
-    extractProductContext.mockResolvedValue(FAKE_EXTRACTION);
+    analyzeSaas.mockResolvedValue(fakeAnalysis());
     const first = await register("https://example.com");
 
     crawlSite.mockRejectedValue(new Error("timed out"));
@@ -185,6 +265,6 @@ describe("runProductSetup", () => {
     const context = await db.query.productContexts.findFirst({
       where: eq(schema.productContexts.productId, first.productId),
     });
-    expect(context?.what).toBe("what");
+    expect(context?.what).toBe("分析されたwhat");
   });
 });

@@ -4,6 +4,7 @@ import { AppError } from "@/core/errors";
 import type { LLMProvider } from "@/core/llm";
 
 import type { CrawledPage, PageSection } from "./crawl";
+import { UNSTATED } from "./unstated";
 
 /**
  * The back half of the Product Context Engine: crawled pages in, a structured
@@ -175,12 +176,11 @@ export function buildExtractionInput(pages: CrawledPage[], draft: ProductContext
 }
 
 /**
- * What an unstated field is written as, both by the model (per the system
- * prompt above) and by the rule-based reading below. Exported so callers that
- * need to tell "stated" from "unstated" — the site audit, in particular —
- * check against the same literal rather than a second copy of it.
+ * Re-exported from ./unstated so the many existing importers keep working.
+ * The definition lives apart because a client component needs it too — see
+ * that file.
  */
-export const UNSTATED = "サイト上に明示なし";
+export { UNSTATED } from "./unstated";
 
 const NO_TEXT_NOTE =
   "取得したページに本文テキストが無かったため抽出できませんでした(クライアント側JavaScriptで描画されるサイトの可能性があります)。";

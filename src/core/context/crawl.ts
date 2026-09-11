@@ -70,6 +70,20 @@ export interface CrawledPage {
   meta: Record<string, string>;
   /** Headings and the copy under each, in document order. See PageSection. */
   sections: PageSection[];
+  /**
+   * The labels on buttons and prominent links — "無料で始める", "Book a demo",
+   * "Download". A page's calls to action say what it wants the reader to do,
+   * which is the most direct statement of its business model anywhere on it:
+   * "Start free trial" and "Contact sales" describe two different companies.
+   */
+  ctas: string[];
+  /**
+   * Strings that look like prices, in document order. Pulled out rather than
+   * left in the body text because they are the one fact about a SaaS that a
+   * reader checks first and a model skims past — "$9/mo" is four characters in
+   * a thousand-word page.
+   */
+  prices: string[];
   /** Same-origin links found on this page, absolute and de-duplicated. */
   links: string[];
   /** Which of the three steps above produced `text`. */
@@ -118,16 +132,23 @@ const DEFAULTS = {
 const USER_AGENT = "GrapeBot/0.1 (+https://github.com/; indie product growth assistant)";
 
 /**
- * Paths that usually carry the value proposition. Crawling is capped at a
- * handful of pages, so spend them on the pages most likely to say what the
- * product is, rather than on whatever the nav happens to list first.
+ * Paths that usually carry the value proposition, most valuable first.
+ * Crawling is capped at a handful of pages, so spend them on the pages most
+ * likely to say what the product is, rather than on whatever the nav happens
+ * to list first.
+ *
+ * The order is the order the analysis needs answers in: what it is and who for
+ * (about/features), then what it costs (pricing), then the long tail that only
+ * fills gaps (faq, docs, contact).
  */
 const PRIORITY_PATTERNS = [
   /^\/?$/,
-  /^\/(about|what|product|features?|why)/i,
-  /^\/(pricing|plans?)/i,
-  /^\/(docs?|documentation|guide|getting-started)/i,
+  /^\/(about|company|what|why)/i,
+  /^\/(features?|product|solutions?|use-?cases?|tour)/i,
+  /^\/(pricing|plans?|price)/i,
   /^\/(faq|help|support)/i,
+  /^\/(docs?|documentation|guide|getting-?started)/i,
+  /^\/(contact|sales|demo)/i,
 ];
 
 const SKIP_EXTENSIONS =
@@ -196,6 +217,7 @@ export function parseHtml(html: string, pageUrl: string, maxTextChars: number): 
 
   const title = $("title").first().text().trim() || null;
   const headingSections = extractSections($);
+  const ctas = extractCtas($);
   // Last, because it rewrites the DOM to recover line breaks — everything
   // above reads the markup as served.
   const text = visibleText($, maxTextChars);
@@ -206,6 +228,8 @@ export function parseHtml(html: string, pageUrl: string, maxTextChars: number): 
     text,
     meta,
     sections: headingSections.length > 0 ? headingSections : sectionsFromLines(text),
+    ctas,
+    prices: extractPrices(text),
     links: [...links],
     manifestUrl,
   };
@@ -218,6 +242,55 @@ const MAX_SECTION_BODY_CHARS = 600;
 
 function collapse(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+/** Enough to characterise what a page asks of its reader; more than this is a nav bar. */
+const MAX_CTAS = 12;
+/** A call to action is a few words on a button, not a paragraph that happens to be clickable. */
+const MAX_CTA_CHARS = 40;
+const MAX_PRICES = 12;
+
+/**
+ * Button and prominent-link labels, de-duplicated in document order.
+ *
+ * Deliberately not every `<a>`: a nav bar would drown the handful of labels
+ * that mean something. Buttons, submits and anything explicitly given a button
+ * role are what a page uses for the action it actually wants.
+ */
+function extractCtas($: cheerio.CheerioAPI): string[] {
+  const found = new Set<string>();
+
+  $("button, [role='button'], input[type='submit'], a[class*='button'], a[class*='btn'], a[class*='cta']").each(
+    (_, element) => {
+      if (found.size >= MAX_CTAS) return false;
+
+      const node = $(element);
+      const label = collapse(node.attr("value") ?? node.text() ?? "");
+      if (label && label.length <= MAX_CTA_CHARS) found.add(label);
+    },
+  );
+
+  return [...found];
+}
+
+/**
+ * Price-shaped strings: a currency marker next to a number, or a Japanese
+ * amount, plus the per-period suffix when one follows.
+ *
+ * Loose on purpose. A false positive costs a line in a prompt; a miss costs
+ * the pricing answer entirely, and pricing is the single most-checked fact
+ * about a SaaS.
+ */
+const PRICE_PATTERN =
+  /(?:[$€£¥]\s?\d[\d,]*(?:\.\d+)?|\d[\d,]*\s?円|\d[\d,]*\s?ドル)(?:\s?\/\s?(?:mo|month|yr|year|月|年|人|seat|user))?/gi;
+
+function extractPrices(text: string): string[] {
+  const found = new Set<string>();
+  for (const match of text.matchAll(PRICE_PATTERN)) {
+    found.add(collapse(match[0]));
+    if (found.size >= MAX_PRICES) break;
+  }
+  return [...found];
 }
 
 /** Elements that end a line when a reader looks at the page, whatever the markup does about it. */
@@ -387,7 +460,18 @@ async function fetchPage(url: string, options: FetchSettings): Promise<FetchedPa
 }
 
 function unreadable(url: string, status: number): CrawledPage {
-  return { url, status, title: null, text: "", meta: {}, sections: [], links: [], renderedWith: "static" };
+  return {
+    url,
+    status,
+    title: null,
+    text: "",
+    meta: {},
+    sections: [],
+    ctas: [],
+    prices: [],
+    links: [],
+    renderedWith: "static",
+  };
 }
 
 async function toCrawledPage(

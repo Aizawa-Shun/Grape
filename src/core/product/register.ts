@@ -1,11 +1,15 @@
 import { eq } from "drizzle-orm";
 
+import type { SaasAnalysis } from "@/core/context/analysis";
+import { analyzeSaas } from "@/core/context/analyze";
 import { crawlSite } from "@/core/context/crawl";
+import { contextFromAnalysis } from "@/core/context/derive";
 import { AppError, toAppError } from "@/core/errors";
-import { extractProductContext } from "@/core/context/extract";
+import { extractProductContext, type ProductContextExtraction } from "@/core/context/extract";
 import { getProvider, llmAvailable } from "@/core/llm";
 import { db, schema } from "@/db/client";
 import { normalizeUrl } from "@/core/context/crawl";
+import { describeError, log } from "@/server/log";
 import { describeForUser } from "@/server/http/errors";
 
 /**
@@ -89,11 +93,7 @@ export async function runProductSetup({ productId, url }: StartedProduct): Promi
       });
     }
 
-    // No AI configured is not a failure here — the rule-based reading inside
-    // extractProductContext is the actual product understanding on a Grape
-    // with no LLM_PROVIDER set, not an error state to refuse registration
-    // over.
-    const extraction = await extractProductContext(pages, llmAvailable() ? getProvider() : null);
+    const { extraction, analysis } = await readSite(pages);
 
     const version = await nextContextVersion(productId);
     await db.insert(schema.productContexts).values({
@@ -106,6 +106,7 @@ export async function runProductSetup({ productId, url }: StartedProduct): Promi
       sourcePages: extraction.evidenceUrls,
       confidence: extraction.confidence,
       gaps: extraction.gaps,
+      analysis,
       primaryLanguage: extraction.primaryLanguage,
       editedByHuman: false,
     });
@@ -133,6 +134,40 @@ export async function runProductSetup({ productId, url }: StartedProduct): Promi
       .update(schema.products)
       .set({ setupStatus: "failed", setupError: message })
       .where(eq(schema.products.id, productId));
+  }
+}
+
+/**
+ * The reading of the site, by whichever route is available.
+ *
+ * With a model configured this is the full SaaS analysis, and the four Product
+ * Context fields are derived from it so that everything downstream keeps
+ * working unchanged (see context/derive.ts). Without one — AI is opt-in, see
+ * env.ts — it falls back to the rule-based reading, which fills `what` from
+ * the page's own metadata and leaves the rest honestly unstated.
+ *
+ * A model that fails mid-analysis falls back too, rather than failing the
+ * registration: a rule-based context is worth more than an error page, and the
+ * owner can re-register once the model is reachable again.
+ */
+async function readSite(
+  pages: Awaited<ReturnType<typeof crawlSite>>,
+): Promise<{ extraction: ProductContextExtraction; analysis: SaasAnalysis | null }> {
+  if (!llmAvailable()) {
+    return { extraction: await extractProductContext(pages, null), analysis: null };
+  }
+
+  try {
+    const analysis = await analyzeSaas(pages, getProvider());
+    return { extraction: contextFromAnalysis(analysis), analysis };
+  } catch (error) {
+    // A crawl that reached nothing is the caller's failure to report, not
+    // something to paper over with a rule-based reading of no pages.
+    const code = toAppError(error).code;
+    if (code === "CRAWL_EMPTY" || code === "CRAWL_UNREACHABLE") throw error;
+
+    log.warn("product.analysis_failed", describeError(error));
+    return { extraction: await extractProductContext(pages, null), analysis: null };
   }
 }
 

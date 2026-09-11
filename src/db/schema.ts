@@ -1,5 +1,6 @@
 import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
+import type { SaasAnalysis } from "@/core/context/analysis";
 import { TASK_KINDS } from "@/core/llm/types";
 
 /**
@@ -186,6 +187,22 @@ export const productContexts = sqliteTable(
      * worth surfacing in the UI, not worth discarding after a paid LLM call.
      */
     gaps: text("gaps", { mode: "json" }).$type<string[]>().notNull().default([]),
+    /**
+     * The full structured SaaS analysis, when a model produced one — overview,
+     * target users, business model, market, insights, and the evidence behind
+     * each (see core/context/analysis.ts).
+     *
+     * Nullable, and the four text columns above stay authoritative for
+     * everything downstream. Three separate reasons, all of them load-bearing:
+     * rows written before this existed have no analysis and must still render;
+     * a Grape with no LLM_PROVIDER configured never gets one at all and falls
+     * back to the rule-based reading; and every prompt built from a Product
+     * Context (see context/snapshot.ts) is byte-stable for caching, which a new
+     * field in the middle of it would invalidate. So this is what the product
+     * page shows, and `what`/`who`/`why`/`how` remain what the rest of the
+     * system reasons over — derived from this when it is present.
+     */
+    analysis: text("analysis", { mode: "json" }).$type<SaasAnalysis>(),
     /** BCP-47 code of the site's primary language. Null on a human edit. */
     primaryLanguage: text("primary_language"),
     /** Set when a human corrected the extraction. Downstream prompts say so. */
