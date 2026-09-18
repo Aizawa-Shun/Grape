@@ -27,10 +27,15 @@ import { env, parseEnv, type Env } from "@/env";
  *   that an auth bypass on a tunnel-exposed instance cannot read or rewrite
  *   them, and so they never sit in a database file that gets backed up.
  * - DATABASE_URL cannot be here: it is what this table is read from.
- * - GRAPE_ACTION_DRY_RUN is excluded on purpose. Posting to X is irreversible
- *   and metered, and "edit a file, then restart" is a deliberate brake — see
- *   the comment in api/tasks/[id]/approve/route.ts. Turning it into a toggle
- *   would put one click between a draft and a real, billed post.
+ *
+ * GRAPE_ACTION_DRY_RUN *is* here, as the one deliberate exception to "settings
+ * that cost nothing to get wrong". Posting to X is irreversible and metered,
+ * so it is not exposed through the generic form above — /settings never lets
+ * it ride along in a batched save the way a timeout or a log level can. It has
+ * its own control (settings/dry-run-toggle.tsx) that asks a separate,
+ * explicit confirmation before it will flip the value to `false` — see the
+ * comment in api/tasks/[id]/approve/route.ts for why that confirmation is
+ * worded as a real question rather than a dialog people learn to click through.
  */
 export const OVERRIDABLE_KEYS = [
   "LLM_PROVIDER",
@@ -45,6 +50,7 @@ export const OVERRIDABLE_KEYS = [
   "LLM_MONTHLY_BUDGET_USD",
   "GRAPE_EVENT_RETENTION_DAYS",
   "GRAPE_LOG_LEVEL",
+  "GRAPE_ACTION_DRY_RUN",
 ] as const;
 
 export type OverridableKey = (typeof OVERRIDABLE_KEYS)[number];

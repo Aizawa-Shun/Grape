@@ -4,9 +4,9 @@ import { notFound } from "next/navigation";
 import { estimateActionCostUsd } from "@/core/action/channel";
 import { Page, PageHeader } from "@/components/ui/page";
 import { findOwnedProduct } from "@/core/product/ownership";
+import { loadSettings } from "@/core/settings";
 import { db, schema } from "@/db/client";
 import { requireUser } from "@/server/auth/current-user";
-import { env } from "@/env";
 
 import { DiagnosisPanel } from "../diagnosis-panel";
 
@@ -25,6 +25,11 @@ export default async function TasksPage({ params }: { params: Promise<{ id: stri
   // does not exist: a separate "not yours" would confirm the id is real.
   const product = await findOwnedProduct(id, (await requireUser()).id);
   if (!product) notFound();
+
+  // The effective value, not the raw .env one — GRAPE_ACTION_DRY_RUN can now
+  // be flipped from /settings (see settings/dry-run-toggle.tsx) and this page
+  // must reflect that on the very next load, not just after a restart.
+  const settings = await loadSettings();
 
   const latestDiagnosis =
     (await db.query.diagnoses.findFirst({
@@ -77,7 +82,7 @@ export default async function TasksPage({ params }: { params: Promise<{ id: stri
         productId={id}
         diagnosis={latestDiagnosis}
         tasks={tasks}
-        dryRun={env.GRAPE_ACTION_DRY_RUN}
+        dryRun={settings.GRAPE_ACTION_DRY_RUN}
       />
     </Page>
   );

@@ -55,7 +55,7 @@ export async function GET(request: Request) {
       config: {
         provider: settings.LLM_PROVIDER,
         ingestBaseUrl: settings.INGEST_BASE_URL,
-        actionDryRun: env.GRAPE_ACTION_DRY_RUN,
+        actionDryRun: settings.GRAPE_ACTION_DRY_RUN,
         coldStartMinSessions: settings.COLD_START_MIN_SESSIONS,
       },
     },

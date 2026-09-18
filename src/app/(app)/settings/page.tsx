@@ -13,6 +13,7 @@ import { requireUser } from "@/server/auth/current-user";
 
 import { KeyEventForm } from "../products/[id]/key-event-form";
 import { TrackingSnippet } from "../products/[id]/tracking-snippet";
+import { DryRunToggle } from "./dry-run-toggle";
 import { SettingsForm } from "./settings-form";
 
 export const dynamic = "force-dynamic";
@@ -85,7 +86,12 @@ export default async function SettingsPage({
       <div className="border-t border-border" />
 
       {/* publicSettings on both sides: only the overridable keys cross into
-          the client bundle, never the secrets that sit beside them in Env. */}
+          the client bundle, never the secrets that sit beside them in Env.
+          GRAPE_ACTION_DRY_RUN rides along in these two objects because it is
+          now in OVERRIDABLE_KEYS, but SettingsForm has no field for it, so it
+          is never edited here — a generic save merely re-sends its current
+          value unchanged. DryRunToggle below is the only control allowed to
+          actually change it. */}
       <SettingsForm
         values={publicSettings(settings)}
         defaults={publicSettings(env)}
@@ -101,23 +107,18 @@ export default async function SettingsPage({
         title="ここでは変えられないもの"
         description={
           <>
-            鍵と、お金が動く操作のブレーキです。<code className="font-mono">.env</code>{" "}
-            を直接編集して、サーバーを再起動してください。
+            鍵は<code className="font-mono">.env</code>
+            を直接編集して、サーバーを再起動してください。練習モードだけは下で切り替えられます
+            — オフにする前に確認が出ます。
           </>
         }
       >
         <dl className="flex flex-col divide-y divide-border overflow-hidden rounded-md border border-border text-sm shadow-card">
-          <div className="flex items-center justify-between gap-3 px-3 py-2.5">
-            <dt>
-              練習モード
-              <span className="block text-xs text-text-muted">
-                投稿は取り消せず費用もかかるので、解除は意図的な2手間のままにしています。
-              </span>
-            </dt>
-            <dd className="shrink-0 font-medium">
-              {env.GRAPE_ACTION_DRY_RUN ? "オン（送りません）" : "オフ（本当に送ります）"}
-            </dd>
-          </div>
+          <DryRunToggle
+            dryRun={settings.GRAPE_ACTION_DRY_RUN}
+            envDryRun={env.GRAPE_ACTION_DRY_RUN}
+            wasOverridden={"GRAPE_ACTION_DRY_RUN" in overrides}
+          />
 
           {configuredKeys.map((key) => (
             <div key={key.label} className="flex items-center justify-between gap-3 px-3 py-2.5">

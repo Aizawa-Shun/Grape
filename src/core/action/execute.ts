@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 
 import { AppError } from "@/core/errors";
-import { env } from "@/env";
+import { currentSettings } from "@/core/settings";
 import { db, schema, type Database } from "@/db/client";
 import { log } from "@/server/log";
 
@@ -19,7 +19,12 @@ import { getChannel } from "./channels";
  *   2. Even once approved, GRAPE_ACTION_DRY_RUN (default true) still stops an
  *      `x` send short of the network call and just logs what would have gone
  *      out. Flipping it to `false` is a deliberate, separate decision from
- *      writing the artifact or clicking approve.
+ *      writing the artifact or clicking approve — made through the confirm-
+ *      gated control on /settings (see settings/dry-run-toggle.tsx) or by
+ *      editing .env directly, never as a side effect of anything in this file.
+ *      Read through `currentSettings()`, not the raw `env` import, so a
+ *      change made from /settings takes effect on the very next approval
+ *      without a restart.
  * The `manual` channel has no network call to gate — see channels/manual.ts —
  * so dry-run does not apply to it; approving a manual task always finishes it.
  */
@@ -70,7 +75,7 @@ export async function approveAndExecute(
     })
     .returning();
 
-  const dryRun = task.channel !== "manual" && env.GRAPE_ACTION_DRY_RUN;
+  const dryRun = task.channel !== "manual" && currentSettings().GRAPE_ACTION_DRY_RUN;
 
   if (dryRun) {
     // The one place dry-run's effect is actually visible: this is what a real

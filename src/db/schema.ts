@@ -432,8 +432,10 @@ export const llmCalls = sqliteTable(
  * `parseEnv(process.env)` runs once at import — so a settings screen that
  * wrote to that file would appear to save while changing nothing.
  *
- * Deliberately not a home for secrets or for GRAPE_ACTION_DRY_RUN: see
- * core/settings for which keys are allowed and why.
+ * Deliberately not a home for secrets: see core/settings for which keys are
+ * allowed and why. GRAPE_ACTION_DRY_RUN is the one row here with a real
+ * safety cost attached, so nothing writes it except the confirm-gated control
+ * in settings/dry-run-toggle.tsx.
  */
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),

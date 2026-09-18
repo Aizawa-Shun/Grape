@@ -18,8 +18,11 @@ const ApproveInputSchema = z.object({
  * (generate, diagnose, recommend) only reads and reasons. GRAPE_ACTION_DRY_RUN
  * still applies inside approveAndExecute regardless of what this route does;
  * there is no separate "confirm you really mean it" step here because the
- * dry-run flag *is* that step, set deliberately in .env rather than clicked
- * through in a dialog that trains people to click it without reading it.
+ * dry-run flag *is* that step. It can be set in .env, or from /settings
+ * through settings/dry-run-toggle.tsx — but that control is deliberately not
+ * a checkbox in the general settings form: it asks its own window.confirm
+ * naming the actual consequence before it will turn sending on, rather than
+ * being a dialog people learn to click through as part of a batched save.
  */
 export const POST = route(
   "task.approve",

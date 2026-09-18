@@ -18,10 +18,12 @@ describe("OVERRIDABLE_KEYS", () => {
     }
   });
 
-  it("excludes the dry-run flag, which is the brake on spending money", () => {
-    // Deliberate: turning this into a web toggle would put one click between a
-    // draft and a real, billed, irreversible post.
-    expect(isOverridable("GRAPE_ACTION_DRY_RUN")).toBe(false);
+  it("allows the dry-run flag, which has its own confirm-gated control rather than the generic form", () => {
+    // Overridable so /settings can offer it at all, but settings-form.tsx never
+    // lists it among the generic fields — see settings/dry-run-toggle.tsx,
+    // which is the only path that is allowed to write this key and does so
+    // behind a window.confirm, not a batched save.
+    expect(isOverridable("GRAPE_ACTION_DRY_RUN")).toBe(true);
   });
 
   it("covers the operational settings someone would actually want to change", () => {
@@ -86,11 +88,20 @@ describe("resolveSettings", () => {
 
   it("ignores a key that is not overridable, even if one is stored", () => {
     const settings = resolveSettings(
-      { GRAPE_ACTION_DRY_RUN: "true" },
-      { GRAPE_ACTION_DRY_RUN: "false" } as never,
+      { ANTHROPIC_API_KEY: "sk-ant-from-env" },
+      { ANTHROPIC_API_KEY: "sk-ant-from-db" } as never,
     );
 
-    expect(settings.GRAPE_ACTION_DRY_RUN).toBe(true);
+    expect(settings.ANTHROPIC_API_KEY).toBe("sk-ant-from-env");
+  });
+
+  it("lets a stored value flip the dry-run flag, same as any other overridable key", () => {
+    const settings = resolveSettings(
+      { GRAPE_ACTION_DRY_RUN: "true" },
+      { GRAPE_ACTION_DRY_RUN: "false" },
+    );
+
+    expect(settings.GRAPE_ACTION_DRY_RUN).toBe(false);
   });
 });
 
