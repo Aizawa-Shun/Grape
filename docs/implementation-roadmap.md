@@ -9,15 +9,17 @@
 マスタープロンプトのPhase 1は「UI基盤」だが、その前提として空のディレクトリにプロジェクトを
 立ち上げる作業が必要。これをPhase 1の最初のステップとして行う。
 
-- [ ] `git init` — **最優先**。今回のデータ消失の再発防止のため、初期化直後から頻繁にコミットする運用にする
-- [ ] `pnpm create next-app` 相当でNext.js(App Router, TypeScript, Tailwind, ESLint)を初期化
-- [ ] Drizzle ORM + SQLite セットアップ(`src/server/db/`, `drizzle.config.ts`)
-- [ ] Vitest + Testing Library セットアップ
+- [x] `git init` — **最優先**。今回のデータ消失の再発防止のため、初期化直後から頻繁にコミットする運用にする
+- [x] `pnpm create next-app` 相当でNext.js(App Router, TypeScript, Tailwind, ESLint)を初期化
+- [x] ~~Drizzle ORM + SQLite セットアップ~~ → **Firebase(Firestore + Admin SDK)に変更**(Phase 2着手後、
+      利用者の指示により方針転換。経緯は[current-state.md §8](./current-state.md)参照)。
+      `src/server/firebase/`, `firebase.json`, `firestore.rules`
+- [x] Vitest + Testing Library セットアップ(Firestoreを伴うテストはエミュレータ上で実行)
 - [ ] `.env.example` / `.gitignore` 整備
 - [ ] `README.md` に起動手順を記載
 - [ ] 初回コミット
 
-## Phase 1: UI Foundation
+## Phase 1: UI Foundation — ✅ 完了
 
 - アプリケーションシェル(サイドナビ or トップナビ、レスポンシブ)
 - デザイントークン(色・タイポグラフィ・spacing)をTailwind設定に反映
@@ -29,13 +31,17 @@
 **完了条件**: 全画面(Overview/Product/Market/Opportunities/Experiments/Execution/Results)の
 空状態(まだ何も無い状態)が、同一のデザイン言語で表示できること。
 
-## Phase 2: Product Onboarding
+## Phase 2: Product Onboarding — ✅ 完了(2026-09-19)
 
-- Product登録フォーム(URL, 概要, 想定顧客, 解決する課題)
-- Server Actionでの保存・バリデーション
-- Drizzleスキーマ: `products` テーブル
-- 一覧・詳細・編集画面
-- 完了条件はマスタープロンプト記載の通り(再読み込みでデータ保持、編集可、空状態、入力エラー表示)
+- [x] Product登録フォーム(URL, 概要, 想定顧客, 解決する課題)
+- [x] Server Actionでの保存・バリデーション(Zod)
+- [x] Firestore `products` コレクション
+- [x] 一覧・詳細・編集画面
+- [x] 完了条件(再読み込みでデータ保持、編集可、空状態、入力エラー表示)— E2Eで確認済み
+
+**保留事項**: Firebase App Hostingへの実デプロイ。Blaze課金プランへのアップグレードが必須だが、
+利用者の判断で今回は保留(Firestore/DBの完成を優先)。GitHubリポジトリとの連携も別途必要。
+再開する際は `firebase apphosting:backends:create --non-interactive` から着手できる。
 
 ## Phase 3: Product Intelligence
 
