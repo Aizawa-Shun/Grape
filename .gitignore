@@ -34,11 +34,6 @@ yarn-error.log*
 .env*
 !.env.example
 
-# local database
-*.db
-*.db-journal
-*.db-shm
-*.db-wal
 
 # vercel
 .vercel
@@ -46,3 +41,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# firebase
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+.firebase/

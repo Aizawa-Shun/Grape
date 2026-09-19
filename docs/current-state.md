@@ -89,3 +89,41 @@
 
 「UI Foundation」に入る前に、プロジェクトの初期化(`git init`、Next.jsプロジェクト作成、
 基本ツールチェーンのセットアップ)が必要になる。詳細は [implementation-roadmap.md](./implementation-roadmap.md) を参照。
+
+## 8. Firebaseへの移行(2026-09-19、Phase 2着手時)
+
+Phase 1完了・Phase 2着手後、利用者の指示により **DB/クラウド技術をSQLite+Drizzle ORMから
+Firebase(Firestore)に変更**した。
+
+### 経緯
+
+- Phase 1では、マスタープロンプト7章の想定に沿って SQLite + Drizzle ORM でプロジェクトを初期化し、
+  Phase 2(Product Onboarding)のCRUD機能を実装・テスト・E2E確認まで完了していた。
+- Phase 2の途中で利用者から「DBやそのほかクラウド技術はFirebaseを利用する」との指示があり、以下を確認した上で方針転換した:
+  - Firebaseプロジェクト: 新規作成(`grape-growth-os`)
+  - 導入範囲: **Firestore(DB)+ Firebase Hostingへのデプロイ**(Firebase Authは今回のスコープ外)
+  - Firestoreリージョン: `asia-northeast1`(東京)
+
+### 実施内容
+
+- `firebase-tools` CLI(ログイン済み: shun.aizawa2001@gmail.com)経由でFirebaseプロジェクト
+  `grape-growth-os` を新規作成
+- Firestore(Standard Edition, asia-northeast1)を作成
+- サーバー専用のIAMサービスアカウント `grape-app-server` を作成し、`roles/datastore.user` のみ付与
+  (最小権限)。キーを発行し `.env.local` に格納(リポジトリにもディスクにも鍵ファイルは残していない)
+- `firestore.rules` でクライアント(ブラウザ)からの読み書きを全拒否に設定・デプロイ。
+  データアクセスはすべてFirebase Admin SDK経由・サーバーサイドのみに限定する設計とした
+  (Firebase Auth未導入のため、Firestoreルールでのユーザー単位アクセス制御ができない制約への対応)
+- SQLite/Drizzle関連のコード・依存関係(`better-sqlite3`, `drizzle-orm`, `drizzle-kit` 等)を削除し、
+  Firestoreベースのデータアクセス層(`src/server/firebase/`)に置き換え
+- テストはFirestoreエミュレータ(`firebase emulators:exec`)上で実行するよう変更。
+  `pnpm dev` もエミュレータ経由で起動し、**ローカル開発が本番Firestoreを汚さない**ようにした
+
+### 既知の制約・今後の検討事項
+
+- **認証なしで公開する場合のリスク**: 今回のスコープにFirebase Authは含まれていない。
+  Firebase Hostingへ実際にデプロイした場合、Next.jsアプリ自体はログイン機能を持たないため、
+  URLを知る誰でもアクセスできる状態になる。個人利用の間は許容範囲だが、公開URLを配布する前に
+  最低限のアクセス制御(簡易パスワードゲート等)の導入を推奨する。
+- Firebase Hostingへのデプロイ(App Hosting)の具体的な設定は、本ドキュメント作成時点で
+  [implementation-roadmap.md](./implementation-roadmap.md) と Phase 2完了報告にて別途記載する。

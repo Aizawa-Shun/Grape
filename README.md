@@ -6,13 +6,23 @@ AI Growth Experiment OS。
 プロダクトの背景・設計方針は [docs/architecture.md](docs/architecture.md) を、
 現在の実装状況とロードマップは [docs/implementation-roadmap.md](docs/implementation-roadmap.md) を参照。
 
+## 前提ツール
+
+- Node.js 22 / pnpm
+- [Firebase CLI](https://firebase.google.com/docs/cli)(`npm i -g firebase-tools`)、`firebase login` 済みであること
+- Java(Firestoreエミュレータの実行に必要。`java -version` で確認)
+
 ## 開発を始める
 
 ```bash
 pnpm install
-cp .env.example .env.local   # 値を設定(AI機能を使う場合はANTHROPIC_API_KEY等)
+cp .env.example .env.local   # Firebaseのサービスアカウント情報などを設定
 pnpm dev
 ```
+
+`pnpm dev` は Firestoreエミュレータを自動起動してから `next dev` を実行する
+(`firebase emulators:exec`)。**本番のFirestoreには書き込まない。**
+本番データに対してdevサーバーを動かしたい場合のみ `pnpm dev:prod-data` を使う(通常は非推奨)。
 
 [http://localhost:3000](http://localhost:3000) を開く(`/overview` へ自動リダイレクト)。
 
@@ -20,32 +30,36 @@ pnpm dev
 
 | コマンド | 内容 |
 |---|---|
-| `pnpm dev` | 開発サーバー起動 |
+| `pnpm dev` | Firestoreエミュレータ + 開発サーバー起動 |
+| `pnpm dev:prod-data` | エミュレータを使わず、本番Firestoreに接続して開発サーバー起動 |
 | `pnpm build` | 本番ビルド |
 | `pnpm start` | 本番ビルドの起動 |
 | `pnpm lint` | ESLint |
 | `pnpm typecheck` | TypeScriptの型チェック |
-| `pnpm test` | Vitestでテスト実行 |
-| `pnpm test:watch` | Vitestをwatchモードで実行 |
-| `pnpm db:generate` | `src/server/db/schema.ts` からマイグレーションSQLを生成 |
-| `pnpm db:migrate` | マイグレーションをDBに適用 |
-| `pnpm db:studio` | Drizzle StudioでローカルDBを閲覧 |
+| `pnpm test` | Firestoreエミュレータ上でVitestを実行 |
+| `pnpm test:watch` | 同上、watchモード |
+| `firebase deploy --only firestore:rules` | Firestoreセキュリティルールをデプロイ |
 
 ## 技術スタック
 
-Next.js (App Router) / React / TypeScript / Tailwind CSS / Drizzle ORM + SQLite / Vitest
+Next.js (App Router) / React / TypeScript / Tailwind CSS / Firebase (Firestore + Admin SDK) / Vitest
+
+データベースはFirestoreを使用する。クライアント(ブラウザ)からは直接アクセスせず
+(`firestore.rules` で全拒否)、すべての読み書きはサーバー側(Server Actions /
+Server Components)からFirebase Admin SDK経由で行う。
 
 ## ディレクトリ構成
 
 ```
 src/
-  app/(app)/       # ダッシュボード各画面(Overview, Products, Market, Opportunities, Experiments, Execution, Results)
-  app/style-guide/ # 社内確認用のデザインシステムプレビュー(製品ナビには非表示)
-  components/ui/   # 汎用UIコンポーネント(Button, Card, Badge, EmptyState, ErrorState, …)
-  components/layout/ # AppShell, サイドナビ, PageHeader
-  server/db/       # Drizzle ORM スキーマ・DBクライアント
-  server/actions/  # Server Actions(今後追加)
-  server/ai/       # LLM呼び出し層(今後追加)
-docs/              # 調査・設計・ロードマップドキュメント
-drizzle/           # マイグレーションSQL(生成物)
+  app/(app)/          # ダッシュボード各画面(Overview, Products, Market, Opportunities, Experiments, Execution, Results)
+  app/style-guide/    # 社内確認用のデザインシステムプレビュー(製品ナビには非表示)
+  components/ui/      # 汎用UIコンポーネント(Button, Card, Badge, EmptyState, ErrorState, …)
+  components/layout/  # AppShell, サイドナビ, PageHeader
+  server/firebase/    # Firebase Admin SDK初期化・Firestoreデータアクセス層
+  server/actions/     # Server Actions
+  server/ai/          # LLM呼び出し層(今後追加)
+docs/                 # 調査・設計・ロードマップドキュメント
+firebase.json / .firebaserc / firestore.rules / firestore.indexes.json
+                       # Firebaseプロジェクト設定
 ```

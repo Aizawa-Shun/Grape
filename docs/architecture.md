@@ -19,17 +19,19 @@ Outcome から学ぶ、という一連のフローをアプリとして成立さ
 |---|---|---|
 | フレームワーク | Next.js (App Router) + React + TypeScript | マスタープロンプト7章の想定と一致。Server ActionsでAPI層を薄くできる |
 | パッケージマネージャ | pnpm | 過去プロジェクトでも採用。ディスク効率・速度が良い |
-| DB | SQLite (ファイルDB) | マスタープロンプト7章の想定。個人開発規模に十分、セットアップ不要 |
-| ORM/マイグレーション | Drizzle ORM | TypeScript親和性が高く、マイグレーションSQLを目視確認できる運用がしやすい |
+| DB | **Firestore**(Firebaseプロジェクト `grape-growth-os`、リージョン asia-northeast1) | 利用者の指定(Phase 2にて変更)。サーバーレスで運用不要、スケールを気にしなくてよい |
+| DB接続方式 | **Firebase Admin SDK をサーバー側のみで使用**。クライアントSDKは使わず、`firestore.rules` で外部からの読み書きを全拒否 | Server Actions/Server Componentsからのみアクセスする現行アーキテクチャと一致。Firebase Authを導入するまでは、Firestoreセキュリティルールでユーザー単位の権限制御ができないため、Admin SDK経由の一元アクセスで安全性を担保する |
 | スタイリング | Tailwind CSS | デザインシステム(色・spacing・タイポグラフィのトークン化)を高速に一貫構築できる |
 | UIコンポーネント基盤 | 自前の最小デザインシステム(shadcn/ui相当のヘッドレス+Tailwind) | 「Appleのようなシンプルさ」を独自トーンで作り込むため、既製テーマに寄せすぎない |
-| テスト | Vitest + React Testing Library(unit/component)。E2Eは後続フェーズでPlaywright検討 | 高速・Next.jsとの親和性 |
+| テスト | Vitest + React Testing Library(unit/component)。DBを伴う統合テストは **Firestoreエミュレータ**(`firebase emulators:exec`)上で実行 | 高速・Next.jsとの親和性。実際のFirestoreクエリ(orderBy等)を本物のSDKで検証できる |
 | Lint/Format | ESLint + Prettier | 標準的な品質担保 |
 | AI連携 | サーバーサイドのみでLLM呼び出し。`LLM_PROVIDER` 環境変数でプロバイダ切替可能な抽象層 | APIキーをクライアントに露出させない。将来のプロバイダ変更に耐える |
-| 認証 | Phase 1〜2は**単一ユーザー・ローカル前提**(パスワードゲートのみ、必要なら)。マルチユーザー化は本ロードマップの範囲外(将来検討) | マスタープロンプトに認証の明示要件が無く、MVPの複雑度を上げないため |
+| ホスティング | **Firebase App Hosting**(Next.js SSR/Server Actions対応、Cloud Run基盤) | 利用者の指定。Firestoreと同一プロジェクトで完結させ、運用面を単純化する |
+| 認証 | Phase 2時点では**未導入**(単一ユーザー・ローカル前提を維持)。Firebase Authは将来のフェーズで検討 | 今回のスコープはFirestore(DB)+ Hostingに限定(利用者確認済み)。認証無しで公開する場合のリスクはdocs/current-state.md参照 |
 
-> **確認事項**: DB/ORM/スタイリングは提案であり、既存資産の制約が無い今、代替案(例: Prisma、
-> Postgres、CSS Modules)も選択可能。特段の理由が無ければ上記で進める。
+> **2026-09-19 変更**: 当初提案していた SQLite + Drizzle ORM から、利用者の指示により
+> **Firebase(Firestore + Firebase Admin SDK)** に変更した。理由・経緯は
+> [docs/current-state.md](./current-state.md) の「Firebaseへの移行」を参照。
 
 ## 3. ドメインモデル(概念設計)
 
@@ -97,24 +99,27 @@ src/
   server/
     actions/               # Server Actions
     ai/                     # LLM呼び出しの抽象化層
-    db/                     # Drizzle schema, client, migrations
+    firebase/               # Firebase Admin SDK初期化・Firestoreデータアクセス層
   lib/                     # 汎用ユーティリティ
 docs/
-drizzle/                   # マイグレーションSQL
-tests/ もしくは各ファイル隣接の *.test.ts(未確定、Phase 1で決定)
+firebase.json / .firebaserc / firestore.rules / firestore.indexes.json
+                           # Firebaseプロジェクト設定
+各ファイル隣接の *.test.ts(DBを伴うものはFirestoreエミュレータ上で実行)
 ```
 
 ## 5. AIワークフローのアーキテクチャ
 
 - LLM呼び出しは全てサーバーサイド(`src/server/ai/`)に閉じ込め、呼び出し内容・レスポンス・
-  取得日時・成否を監査可能な形でDBに保存する(将来の「AIが実行したこと/していないことの明確な区別」要件)。
+  取得日時・成否を監査可能な形でFirestoreに保存する(将来の「AIが実行したこと/していないことの明確な区別」要件)。
 - 各AI生成コンテンツには「未確認(AI仮説)」「確認済み(ユーザー承認)」のステータスを持たせる。
 - APIキー未設定・エラー時は、UIに明示的なエラー状態を出す(捏造データで埋めない)。
 
 ## 6. 環境変数・シークレット管理
 
 - `.env.local` にAPIキー等を保持(gitignore対象)。`.env.example` にキー名のみ記載してコミット。
-- 想定する変数(初期案): `DATABASE_URL`(SQLiteファイルパス), `LLM_PROVIDER`, `ANTHROPIC_API_KEY`
+  サービスアカウントのJSONキー自体はリポジトリは元よりディスク上にも残さない(値だけ`.env.local`へ転記)。
+- 想定する変数: `FIREBASE_PROJECT_ID` / `FIREBASE_CLIENT_EMAIL` / `FIREBASE_PRIVATE_KEY`
+  (Firebase Admin SDK用サービスアカウント認証情報), `LLM_PROVIDER`, `ANTHROPIC_API_KEY`
   (もしくは選定プロバイダのキー), `GRAPE_ADMIN_PASSWORD`(任意・簡易アクセス制御用)。
 
 ## 7. 段階的自動化のための状態モデル
