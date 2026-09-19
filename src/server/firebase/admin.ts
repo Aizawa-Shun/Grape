@@ -1,4 +1,4 @@
-import { cert, getApps, initializeApp, type App } from "firebase-admin/app";
+import { initializeApp, getApps, type App } from "firebase-admin/app";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
 
 /**
@@ -8,27 +8,23 @@ import { getFirestore, type Firestore } from "firebase-admin/firestore";
  * (firestore.rules で全拒否)。すべての読み書きはこのAdmin SDK経由、
  * つまり Server Actions / Server Components からのみ行う。
  *
- * ローカル開発では `FIRESTORE_EMULATOR_HOST` が設定されていれば
- * firebase-admin が自動的にエミュレータへ接続する(本ファイルでの分岐は不要)。
+ * 認証方式:
+ * - Firebase App Hosting: Application Default Credentials(ADC)
+ *   App Hosting のサービスアカウント `firebase-app-hosting-compute@...`
+ *   が roles/firebase.sdkAdminServiceAgent で自動的に Firestore へのアクセス権を持つ
+ * - ローカル開発: FIRESTORE_EMULATOR_HOST が設定されていればエミュレータを使用
+ * - その他のサーバー環境: gcloud auth application-default login で認証
+ *
+ * 秘密鍵を環境変数に保存しないため安全で、デプロイ環境ごとに異なる認証方式に対応。
  */
 function createApp(): App {
   if (getApps().length > 0) {
     return getApps()[0]!;
   }
 
-  const projectId = process.env.FIREBASE_PROJECT_ID;
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\n/g, "\n");
-
-  if (!projectId || !clientEmail || !privateKey) {
-    throw new Error(
-      "Firebase の認証情報が設定されていません。.env.local に " +
-        "FIREBASE_PROJECT_ID / FIREBASE_CLIENT_EMAIL / FIREBASE_PRIVATE_KEY を設定してください。"
-    );
-  }
+  const projectId = process.env.FIREBASE_PROJECT_ID || "grape-growth-os";
 
   return initializeApp({
-    credential: cert({ projectId, clientEmail, privateKey }),
     projectId,
   });
 }
