@@ -40,6 +40,23 @@ pnpm dev
 | `pnpm test:watch` | 同上、watchモード |
 | `firebase deploy --only firestore:rules` | Firestoreセキュリティルールをデプロイ |
 
+## デプロイ
+
+Firebase App Hosting で本番稼働中。
+
+- 本番URL: https://grape-backend--grape-growth-os.us-east4.hosted.app
+- GitHub `main` ブランチへ push すると自動でビルド・デプロイされる
+
+```bash
+git push origin main   # これだけで本番に反映される
+```
+
+本番環境の認証は **Application Default Credentials** を使う。App Hosting のサービスアカウントが
+Firestore へのアクセス権を持つため、**秘密鍵などの環境変数設定は不要**。
+
+> ⚠ 現在ログイン機能が無いため、URLを知っていれば誰でもアクセスできる。
+> URLを他者に共有する前にアクセス制御の追加が必要。
+
 ## 技術スタック
 
 Next.js (App Router) / React / TypeScript / Tailwind CSS / Firebase (Firestore + Admin SDK) / Vitest

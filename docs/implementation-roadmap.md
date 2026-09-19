@@ -39,9 +39,14 @@
 - [x] 一覧・詳細・編集画面
 - [x] 完了条件(再読み込みでデータ保持、編集可、空状態、入力エラー表示)— E2Eで確認済み
 
-**保留事項**: Firebase App Hostingへの実デプロイ。Blaze課金プランへのアップグレードが必須だが、
-利用者の判断で今回は保留(Firestore/DBの完成を優先)。GitHubリポジトリとの連携も別途必要。
-再開する際は `firebase apphosting:backends:create --non-interactive` から着手できる。
+**デプロイ**: ✅ 完了。Firebase App Hosting にデプロイ済み。
+https://grape-backend--grape-growth-os.us-east4.hosted.app
+
+- バックエンド: `grape-backend`(us-east4) / GitHub `Aizawa-Shun/Grape` の `main` に連携済み
+- `main` への push で自動デプロイされる
+- 認証はサービスアカウント鍵ではなく **ADC**(App Hosting のサービスアカウントが
+  `roles/firebase.sdkAdminServiceAgent` で Firestore 権限を持つ)を使用。
+  そのため本番環境に秘密情報を一切保存していない
 
 ## Phase 3: Product Intelligence
 

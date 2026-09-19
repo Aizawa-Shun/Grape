@@ -121,9 +121,28 @@ Firebase(Firestore)に変更**した。
 
 ### 既知の制約・今後の検討事項
 
-- **認証なしで公開する場合のリスク**: 今回のスコープにFirebase Authは含まれていない。
-  Firebase Hostingへ実際にデプロイした場合、Next.jsアプリ自体はログイン機能を持たないため、
-  URLを知る誰でもアクセスできる状態になる。個人利用の間は許容範囲だが、公開URLを配布する前に
-  最低限のアクセス制御(簡易パスワードゲート等)の導入を推奨する。
-- Firebase Hostingへのデプロイ(App Hosting)の具体的な設定は、本ドキュメント作成時点で
-  [implementation-roadmap.md](./implementation-roadmap.md) と Phase 2完了報告にて別途記載する。
+- **⚠ 現在、認証なしで公開されている**: 今回のスコープにFirebase Authは含まれていないため、
+  デプロイ済みのURLを知っていれば誰でもアクセス・プロダクト登録・編集ができる状態にある。
+  個人利用かつURL非公開の間は許容範囲だが、**URLを他者に共有する前に**
+  最低限のアクセス制御(Firebase Auth、または簡易パスワードゲート)の導入が必要。
+  これは次フェーズ以降で優先的に検討すべき事項。
+
+### デプロイ(2026-09-19 完了)
+
+Firebase App Hosting へのデプロイが完了し、本番稼働している。
+
+- URL: https://grape-backend--grape-growth-os.us-east4.hosted.app
+- バックエンド: `grape-backend` / リージョン us-east4
+  (App Hosting は asia-northeast1 に未対応だったため us-east4 を使用。
+   Firestore 自体は asia-northeast1 のまま)
+- GitHub `Aizawa-Shun/Grape` の `main` ブランチに連携済み。push で自動デプロイ
+
+**認証方式を秘密鍵から ADC に変更**: 当初は `FIREBASE_CLIENT_EMAIL` /
+`FIREBASE_PRIVATE_KEY` を環境変数で渡す方式だったが、App Hosting 上で 500 エラーが継続した。
+App Hosting のサービスアカウント `firebase-app-hosting-compute@...` が
+`roles/firebase.sdkAdminServiceAgent`(datastore の読み書き権限を含む)を既に持つことを確認し、
+Application Default Credentials で認証する方式に変更した。
+これにより**本番環境に秘密情報を保存する必要がなくなった**。
+
+本番での動作確認: 登録 → 詳細表示 → 再読み込み(永続化)→ 一覧表示まで実際に確認済み
+(検証用データは確認後に削除し、本番Firestoreはクリーンな状態)。
