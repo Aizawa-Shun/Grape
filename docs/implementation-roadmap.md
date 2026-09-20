@@ -66,11 +66,27 @@ https://grape-backend--grape-growth-os.us-east4.hosted.app
 エミュレータ利用時のみネットワークアクセスを伴わないダミー鍵を使うよう分岐して解消
 (`src/server/firebase/admin.ts`)。本番(App Hosting)のADCパスは変更していない。
 
-## Phase 4: Market Intelligence
+## Phase 4: Market Intelligence — ✅ 完了(2026-09-20)
 
-- ターゲット顧客・顧客課題・競合・チャネルのデータモデルとCRUD
-- 調査結果に情報源・取得日時を必須で紐付け
-- 取得できなかった情報は「不明」として明示(埋めない)
+- [x] `products/{id}/marketInsights` サブコレクション
+      (category: targetCustomer/customerProblem/competitor/channel,
+       content, recordType: fact/hypothesis/unknown, source, evidence,
+       sourceUrl, sourceTitle, capturedAt, confirmedAt)
+- [x] `products/{id}/researchRuns` サブコレクション(調査実行の監査履歴。
+      Web検索回数も記録し、検索0回なら裏付けが無いことをUIで警告する)
+- [x] **Web検索による実地調査**: Claude Opus 5 + web_search ツール。
+      訓練データからの推測ではなく、実在するページを根拠に調べる
+- [x] 調査結果に情報源URL・ページタイトル・取得日を必須で紐付け
+- [x] 取得できなかった情報は「不明」として明示(推測で埋めない)
+- [x] 調査結果の確認・修正・削除、および手動での追加
+- [x] 再調査時は未確認のAI結果のみ置き換え、確認済みと手動入力は保持
+
+**設計上の判断(2段構成)**: `output_config.format`(構造化出力)は
+Citationsと併用できないため、1回のAPI呼び出しでWeb検索と構造化を
+両立できない。そこで「調査パス(Web検索・自由記述)」→「構造化パス
+(JSON化)」の2段に分けた。構造化パスには調査パスで実際に検索結果として
+得られたURLの一覧のみを渡し、一覧外のURLが混ざった場合はサーバー側で
+破棄する。これによりAIが存在しない情報源を捏造することを防いでいる。
 
 ## Phase 5: Growth Opportunities
 

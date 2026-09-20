@@ -59,7 +59,8 @@ Firestore へのアクセス権を持つため、**秘密鍵などの環境変�
 
 ## 技術スタック
 
-Next.js (App Router) / React / TypeScript / Tailwind CSS / Firebase (Firestore + Admin SDK) / Vitest
+Next.js (App Router) / React / TypeScript / Tailwind CSS / Firebase (Firestore + Admin SDK) /
+Anthropic Claude (Opus 5, 構造化出力・Web検索) / Vitest
 
 データベースはFirestoreを使用する。クライアント(ブラウザ)からは直接アクセスせず
 (`firestore.rules` で全拒否)、すべての読み書きはサーバー側(Server Actions /
