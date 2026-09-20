@@ -1,7 +1,7 @@
-import { CheckCircle2, HelpCircle } from "lucide-react";
+import { CheckCircle2, HelpCircle, MinusCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type EvidenceKind = "fact" | "hypothesis";
+export type EvidenceKind = "fact" | "hypothesis" | "unknown";
 
 const config: Record<
   EvidenceKind,
@@ -17,14 +17,19 @@ const config: Record<
     icon: HelpCircle,
     className: "border-dashed border-warning/50 bg-warning/10 text-warning-foreground",
   },
+  unknown: {
+    label: "不明",
+    icon: MinusCircle,
+    className: "border-dashed border-border bg-muted text-muted-foreground",
+  },
 };
 
 /**
- * Fact(確認された事実)とHypothesis(AI/ユーザーの仮説)を、アプリ全体で
- * 常に同じ見た目で区別するためのバッジ。
+ * Fact(確認された事実)、Hypothesis(AI/ユーザーの仮説)、不明(判断材料が無い)を、
+ * アプリ全体で常に同じ見た目で区別するためのバッジ。
  *
- * マスタープロンプトの必須要件(「AIの推測を事実として表示しない」)を
- * UI上で徹底するための共通プリミティブ。個別画面での自作を避け、必ずこれを使う。
+ * マスタープロンプトの必須要件(「AIの推測を事実として表示しない」「分からないことを
+ * 埋めない」)をUI上で徹底するための共通プリミティブ。個別画面での自作を避け、必ずこれを使う。
  */
 export function EvidenceBadge({
   kind,

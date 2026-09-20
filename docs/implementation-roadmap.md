@@ -48,11 +48,23 @@ https://grape-backend--grape-growth-os.us-east4.hosted.app
   `roles/firebase.sdkAdminServiceAgent` で Firestore 権限を持つ)を使用。
   そのため本番環境に秘密情報を一切保存していない
 
-## Phase 3: Product Intelligence
+## Phase 3: Product Intelligence — ✅ 完了(2026-09-20)
 
-- `product_facts` テーブル(recordType: fact/hypothesis, source, capturedAt)
-- AIによるサービス理解(初回はURLから軽量スクレイピング+LLM要約、失敗時のフォールバック表示必須)
-- Fact/Hypothesis/不明の3区分をUIで視覚的に区別
+- [x] `products/{id}/facts` サブコレクション(category, content, recordType: fact/hypothesis/unknown, source: user/ai, evidence, sourceUrl, confirmedAt)
+- [x] `products/{id}/analysisRuns` サブコレクション(AI実行の監査履歴。成否・エラー内容・取得元・件数を記録)
+- [x] AIによるサービス理解: 登録URLを取得しClaude Opus 5で分析(構造化出力、Zodで検証)
+  - URL取得に失敗しても分析は継続し、その旨を明示した上で登録内容のみから分析する
+  - SSRF対策: プロトコル・ホスト名・解決後IPを検証し、内部ネットワークへのアクセスを拒否
+- [x] Fact / Hypothesis / 不明の3区分をUIで視覚的に区別(EvidenceBadge)
+- [x] AIの出力を利用者が確認・修正・削除できる(「これで合っている」ボタン、修正フォーム)
+- [x] AI不使用でも手動でFactを追加できる経路
+- [x] APIキー未設定・無効・クレジット不足などのエラーを捏造せず明示表示
+
+**修正した問題**: App Hosting用にAdmin SDKをADC(Application Default Credentials)化した際、
+ローカル開発(Firestoreエミュレータ)でも同じADCがGCEメタデータサーバへの到達を試み、
+毎リクエスト30〜60秒のタイムアウトが発生する重大な性能劣化を招いていた。
+エミュレータ利用時のみネットワークアクセスを伴わないダミー鍵を使うよう分岐して解消
+(`src/server/firebase/admin.ts`)。本番(App Hosting)のADCパスは変更していない。
 
 ## Phase 4: Market Intelligence
 
