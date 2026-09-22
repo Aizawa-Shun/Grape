@@ -93,7 +93,7 @@ ${categories}
 }
 
 export async function analyzeProduct(product: Product): Promise<AnalysisResult> {
-  const client = getAnthropicClient();
+  const client = await getAnthropicClient();
 
   let page: { text: string; truncated: boolean } | undefined;
   let fetchError: string | undefined;

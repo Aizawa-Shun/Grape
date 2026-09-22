@@ -3,14 +3,20 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { NAV_ITEMS } from "./nav-items";
+import { NAV_ITEMS, NAV_FOOTER_ITEMS, type NavItem } from "./nav-items";
 
-export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
-  const pathname = usePathname();
-
+function NavLinks({
+  items,
+  pathname,
+  onNavigate,
+}: {
+  items: NavItem[];
+  pathname: string | null;
+  onNavigate?: () => void;
+}) {
   return (
-    <nav className="flex flex-col gap-0.5 px-3">
-      {NAV_ITEMS.map((item) => {
+    <>
+      {items.map((item) => {
         const isActive = pathname === item.href || pathname?.startsWith(`${item.href}/`);
         const Icon = item.icon;
         return (
@@ -31,6 +37,21 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
           </Link>
         );
       })}
-    </nav>
+    </>
+  );
+}
+
+export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
+  const pathname = usePathname();
+
+  return (
+    <div className="flex flex-1 flex-col justify-between">
+      <nav className="flex flex-col gap-0.5 px-3">
+        <NavLinks items={NAV_ITEMS} pathname={pathname} onNavigate={onNavigate} />
+      </nav>
+      <nav className="flex flex-col gap-0.5 border-t border-border px-3 py-3">
+        <NavLinks items={NAV_FOOTER_ITEMS} pathname={pathname} onNavigate={onNavigate} />
+      </nav>
+    </div>
   );
 }

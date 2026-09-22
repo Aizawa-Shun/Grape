@@ -32,7 +32,11 @@ export function ProductForm({
     state: ProductActionState,
     formData: FormData
   ) => Promise<ProductActionState>;
-  product?: Product;
+  /**
+   * 初期値。編集時は既存のProduct、新規登録時はAIが作った下書きを渡す。
+   * 下書きは読み取れなかった項目が空になるため、Partialを許容する。
+   */
+  product?: Partial<Pick<Product, "name" | "url" | "description" | "targetCustomer" | "problem">>;
   submitLabel: string;
   onCancel?: () => void;
   onSuccess?: (state: ProductActionState) => void;

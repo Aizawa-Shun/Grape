@@ -266,7 +266,7 @@ export async function researchMarket(
   product: Product,
   facts: ProductFact[]
 ): Promise<ResearchResult> {
-  const client = getAnthropicClient();
+  const client = await getAnthropicClient();
 
   const { report, sources, searchCount, model } = await runResearchPass(client, product, facts);
   if (!report.trim()) {

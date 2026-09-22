@@ -1,8 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
-import { ProductForm } from "@/components/features/products/product-form";
-import { createProduct } from "@/server/actions/products";
+import { ProductOnboarding } from "@/components/features/products/product-onboarding";
 
 export default function NewProductPage() {
   return (
@@ -16,11 +15,9 @@ export default function NewProductPage() {
       </Link>
       <PageHeader
         title="プロダクトを登録する"
-        description="あなたのWebアプリの基本情報を登録してください。この情報をもとにGrapeがサービスを理解します。"
+        description="サービスのURLを入力してください。AIがページを読み取り、残りの項目を下書きします。"
       />
-      <div className="max-w-xl">
-        <ProductForm action={createProduct} submitLabel="登録する" />
-      </div>
+      <ProductOnboarding />
     </div>
   );
 }

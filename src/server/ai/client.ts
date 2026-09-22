@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { getLlmSettings } from "@/server/firebase/settings";
 
 /**
  * LLMプロバイダの抽象化層。
@@ -13,20 +14,25 @@ export const AI_MODEL = "claude-opus-5";
 export class MissingApiKeyError extends Error {
   constructor() {
     super(
-      "ANTHROPIC_API_KEY が設定されていません。console.anthropic.com で発行したAPIキーを " +
-        ".env.local(本番はApp Hostingの環境変数)に設定してください。"
+      "Anthropic APIキーが設定されていません。設定画面(/settings)でAPIキーを入力するか、" +
+        "ANTHROPIC_API_KEY を .env.local(本番はApp Hostingの環境変数)に設定してください。"
     );
     this.name = "MissingApiKeyError";
   }
 }
 
-export function getAnthropicClient(): Anthropic {
+/**
+ * APIキーは 設定画面で保存された値 > 環境変数 の優先順で解決する。
+ * 設定画面の値がFirestoreに保存されていれば、シェル/App Hostingの環境変数より優先される。
+ */
+export async function getAnthropicClient(): Promise<Anthropic> {
   const provider = process.env.LLM_PROVIDER ?? "anthropic";
   if (provider !== "anthropic") {
     throw new Error(`未対応のLLM_PROVIDERです: ${provider}`);
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const settings = await getLlmSettings();
+  const apiKey = settings.anthropicApiKey || process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     throw new MissingApiKeyError();
   }
@@ -42,7 +48,7 @@ export function describeAiError(error: unknown): string {
   if (error instanceof Anthropic.AuthenticationError) {
     return (
       "APIキーが無効です。console.anthropic.com で発行したキーか確認してください。" +
-      "(シェルに ANTHROPIC_API_KEY が設定されている場合、.env.local の値より優先されます。" +
+      "(設定画面(/settings)でAPIキーを保存している場合、環境変数より優先されます。" +
       "Claude Code等の内部トークンは公開APIでは使えません)"
     );
   }

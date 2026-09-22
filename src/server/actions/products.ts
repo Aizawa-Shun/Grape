@@ -4,10 +4,42 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { insertProduct, updateProductRecord } from "@/server/firebase/products";
 import { parseProductInput } from "@/lib/validation/product";
+import { draftProductFromUrl } from "@/server/ai/product-draft";
+import { describeAiError } from "@/server/ai/client";
+import { PageFetchError } from "@/server/ai/fetch-page";
 import type { ProductActionState } from "@/server/actions/product-types";
+import type { DraftActionState } from "@/server/actions/product-draft-types";
 
 function toRecord(formData: FormData): Record<string, unknown> {
   return Object.fromEntries(formData.entries());
+}
+
+/**
+ * URLからフォームの下書きをAIに作らせる。
+ *
+ * 失敗しても登録自体は手動で続けられるよう、エラーは理由付きで返すだけにして
+ * 画面遷移は行わない。
+ */
+export async function draftProduct(
+  _prevState: DraftActionState,
+  formData: FormData
+): Promise<DraftActionState> {
+  const url = String(formData.get("url") ?? "").trim();
+  if (!url) {
+    return { status: "error", message: "URLを入力してください。" };
+  }
+
+  try {
+    const result = await draftProductFromUrl(url);
+    return { status: "success", draft: result.draft, url: result.url };
+  } catch (error) {
+    // ページ取得の失敗はAIのエラーと原因が違うため、文言を分ける。
+    const message =
+      error instanceof PageFetchError
+        ? `ページを読み取れませんでした(${error.message})。手動で入力してください。`
+        : describeAiError(error);
+    return { status: "error", message };
+  }
 }
 
 /**
