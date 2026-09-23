@@ -4,6 +4,7 @@ import { migrate } from "drizzle-orm/libsql/migrator";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { resetSettingsCache, saveSettings } from "@/core/settings";
+import { runInRequestScope } from "@/server/context";
 import * as schema from "@/db/schema";
 
 import { assertWithinBudget, monthSpendUsd, recordCall, withBudgetGuard } from "./budget";
@@ -20,6 +21,18 @@ async function testDb() {
   const db = drizzle(client, { schema });
   await migrate(db, { migrationsFolder: "./drizzle" });
   return db;
+}
+
+type TestDb = Awaited<ReturnType<typeof testDb>>;
+
+/** llm_calls.user_id is a real foreign key — a per-account test row needs an actual users row behind it. */
+async function makeUser(db: TestDb, id: string): Promise<void> {
+  await db.insert(schema.users).values({
+    id,
+    email: `${id}@example.com`,
+    displayName: id,
+    passwordHash: "unused-in-this-test",
+  });
 }
 
 afterEach(() => {
@@ -68,6 +81,24 @@ describe("monthSpendUsd / recordCall", () => {
     const db = await testDb();
     expect(await monthSpendUsd(db)).toBe(0);
   });
+
+  it("scopes to one account when a userId is passed, since each account now spends on its own key", async () => {
+    const db = await testDb();
+    await makeUser(db, "user-a");
+    await makeUser(db, "user-b");
+    await recordCall(
+      { taskKind: "diagnose", provider: "anthropic", model: "claude-opus-5", usage: { ...EMPTY_USAGE, inputTokens: 1_000_000 }, userId: "user-a" },
+      db,
+    );
+    await recordCall(
+      { taskKind: "diagnose", provider: "anthropic", model: "claude-opus-5", usage: { ...EMPTY_USAGE, inputTokens: 2_000_000 }, userId: "user-b" },
+      db,
+    );
+
+    expect(await monthSpendUsd(db, undefined, "user-a")).toBeCloseTo(15, 5);
+    expect(await monthSpendUsd(db, undefined, "user-b")).toBeCloseTo(30, 5);
+    expect(await monthSpendUsd(db)).toBeCloseTo(45, 5);
+  });
 });
 
 describe("assertWithinBudget", () => {
@@ -93,6 +124,29 @@ describe("assertWithinBudget", () => {
     const error = await assertWithinBudget(db).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(LLMError);
     expect((error as LLMError).failure).toBe("budget_exceeded");
+  });
+
+  it("does not let one account's spend block a different account under the same ceiling", async () => {
+    // Each account now calls the model on its own API key (core/auth/users.ts),
+    // so an instance-wide ceiling would be the wrong thing to check here — see
+    // the comment on assertWithinBudget itself.
+    const db = await testDb();
+    await makeUser(db, "user-a");
+    await makeUser(db, "user-b");
+    await saveSettings({ LLM_MONTHLY_BUDGET_USD: "1" }, db);
+    await recordCall(
+      { taskKind: "diagnose", provider: "anthropic", model: "claude-opus-5", usage: { ...EMPTY_USAGE, inputTokens: 1_000_000 }, userId: "user-a" },
+      db,
+    );
+
+    await expect(
+      runInRequestScope({ requestId: "req-1", userId: "user-b" }, () => assertWithinBudget(db)),
+    ).resolves.toBeUndefined();
+
+    const error = await runInRequestScope({ requestId: "req-2", userId: "user-a" }, () =>
+      assertWithinBudget(db).catch((e: unknown) => e),
+    );
+    expect(error).toBeInstanceOf(LLMError);
   });
 });
 

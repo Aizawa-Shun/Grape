@@ -4,7 +4,9 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { MIN_PASSWORD_LENGTH } from "@/core/auth/policy";
 import { AppError } from "@/core/errors";
 import { db, schema, type Database } from "@/db/client";
+import type { LLMProviderName } from "@/env";
 import { NO_PASSWORD_LOGIN, hashPassword, verifyPassword } from "@/server/auth/password";
+import { decryptSecret, encryptSecret } from "@/server/secret-box";
 
 /**
  * Membership: the first person to arrive owns the instance, and everyone
@@ -504,4 +506,65 @@ export async function signInWithGoogle(
     await consumeInvite(tx, invite.id, user.id, now);
     return user;
   });
+}
+
+// --- LLM credentials ---------------------------------------------------------
+
+/**
+ * Each account's own key, not a shared instance secret. `LLM_PROVIDER` in
+ * .env / /settings still says which service Grape talks to; this is the
+ * credential for whichever account is actually asking, encrypted at rest
+ * (server/secret-box.ts) because — unlike a password — it has to come back
+ * out whole to be sent to the model on the account's behalf.
+ *
+ * `null` clears the key rather than storing an empty string — the account
+ * screen's "delete" is indistinguishable from "never set one" on read either
+ * way, so there is no reason to keep a row that decrypts to "".
+ */
+export async function setLlmApiKey(
+  userId: string,
+  provider: LLMProviderName,
+  apiKey: string | null,
+  database: Database = db,
+): Promise<void> {
+  const trimmed = apiKey?.trim();
+  const encrypted = trimmed ? encryptSecret(trimmed) : null;
+
+  const [updated] = await database
+    .update(schema.users)
+    .set(provider === "anthropic" ? { anthropicApiKey: encrypted } : { openaiApiKey: encrypted })
+    .where(eq(schema.users.id, userId))
+    .returning();
+
+  if (!updated) throw new AppError("NOT_FOUND", `No such account: ${userId}`);
+}
+
+/**
+ * The decrypted key, for the one caller allowed to see it in full —
+ * `getProvider()` (core/llm/index.ts), right before it is handed to the
+ * model. Everything else that only needs to know *whether* a key exists
+ * (the account screen) should read `hasLlmApiKeys` instead, so a page render
+ * never touches decryption at all.
+ */
+export async function getLlmApiKey(
+  userId: string,
+  provider: LLMProviderName,
+  database: Database = db,
+): Promise<string | undefined> {
+  const user = await database.query.users.findFirst({ where: eq(schema.users.id, userId) });
+  const encrypted = provider === "anthropic" ? user?.anthropicApiKey : user?.openaiApiKey;
+  return encrypted ? decryptSecret(encrypted) : undefined;
+}
+
+export interface LlmKeyStatus {
+  anthropic: boolean;
+  "openai-compat": boolean;
+}
+
+export async function hasLlmApiKeys(userId: string, database: Database = db): Promise<LlmKeyStatus> {
+  const user = await database.query.users.findFirst({ where: eq(schema.users.id, userId) });
+  return {
+    anthropic: Boolean(user?.anthropicApiKey),
+    "openai-compat": Boolean(user?.openaiApiKey),
+  };
 }

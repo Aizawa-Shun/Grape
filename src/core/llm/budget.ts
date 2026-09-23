@@ -1,4 +1,4 @@
-import { desc, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 
 import { currentSettings } from "@/core/settings";
 import { currentUserId } from "@/server/context";
@@ -57,12 +57,28 @@ function startOfMonth(now: Date): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 }
 
-/** Sum of `costUsd` for calls recorded since the start of the current calendar month. */
-export async function monthSpendUsd(database: Database = db, now: Date = new Date()): Promise<number> {
+/**
+ * Sum of `costUsd` for calls recorded since the start of the current calendar
+ * month — for the given account when `userId` is passed, across every
+ * account otherwise.
+ *
+ * `userId` matters more than it looks. Each account now calls the model on
+ * its own API key (core/auth/users.ts), so an unfiltered total mixes spend
+ * that lands on entirely different bills. `assertWithinBudget` always passes
+ * one, since the cap it enforces is per account for exactly that reason; the
+ * unfiltered form stays for anything that genuinely wants the whole
+ * instance's estimate.
+ */
+export async function monthSpendUsd(
+  database: Database = db,
+  now: Date = new Date(),
+  userId?: string,
+): Promise<number> {
+  const since = gte(schema.llmCalls.createdAt, startOfMonth(now));
   const rows = await database
     .select({ total: sql<number>`coalesce(sum(${schema.llmCalls.costUsd}), 0)` })
     .from(schema.llmCalls)
-    .where(gte(schema.llmCalls.createdAt, startOfMonth(now)));
+    .where(userId ? and(since, eq(schema.llmCalls.userId, userId)) : since);
   return rows[0]?.total ?? 0;
 }
 
@@ -76,6 +92,11 @@ export async function monthSpendUsd(database: Database = db, now: Date = new Dat
  * and the page only ever wants the groups.
  *
  * Estimated throughout, like everything built on `costUsd` — see pricing.ts.
+ *
+ * Scoped to one account when `userId` is passed, same as `monthSpendUsd` and
+ * for the same reason: each account now spends against its own API key, so
+ * /usage shows the viewer their own breakdown by default rather than a mix of
+ * bills that are not theirs to see or explain.
  */
 export interface SpendGroup {
   key: string;
@@ -105,9 +126,12 @@ const RECENT_LIMIT = 12;
 export async function monthUsage(
   database: Database = db,
   now: Date = new Date(),
+  userId?: string,
 ): Promise<MonthUsage> {
   const since = startOfMonth(now);
-  const thisMonth = gte(schema.llmCalls.createdAt, since);
+  const thisMonth = userId
+    ? and(gte(schema.llmCalls.createdAt, since), eq(schema.llmCalls.userId, userId))
+    : gte(schema.llmCalls.createdAt, since);
 
   const group = async (column: typeof schema.llmCalls.taskKind | typeof schema.llmCalls.model) =>
     (
@@ -155,10 +179,17 @@ export async function monthUsage(
  * single request is expensive enough. This can still overshoot by the cost of
  * one in-flight call, which is accepted — the guard's job is to stop a loop
  * from running unattended overnight, not to bill to the cent.
+ *
+ * Scoped to the calling account, read the same way `recordCall` reads it —
+ * per call, from the ambient request scope, never captured once when the
+ * provider was built. Each account now spends against its own API key, so
+ * the cap this enforces has to be per account too: an instance-wide total
+ * would let one member's usage block a completely different member's calls
+ * over a bill that was never theirs.
  */
 export async function assertWithinBudget(database: Database = db, now: Date = new Date()): Promise<void> {
   const budget = currentSettings().LLM_MONTHLY_BUDGET_USD;
-  const spent = await monthSpendUsd(database, now);
+  const spent = await monthSpendUsd(database, now, currentUserId());
   if (spent >= budget) {
     throw new LLMError(
       `Monthly LLM budget of $${budget.toFixed(2)} reached ($${spent.toFixed(2)} spent so far this month).`,

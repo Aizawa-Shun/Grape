@@ -88,7 +88,7 @@ export interface GenerateOptions {
 
 export async function generateArtifact(taskId: string, options: GenerateOptions = {}): Promise<Artifact> {
   const conn = options.database ?? db;
-  const provider = options.provider ?? getProvider();
+  const provider = options.provider ?? (await getProvider());
 
   const task = await conn.query.tasks.findFirst({ where: eq(schema.tasks.id, taskId) });
   if (!task) throw new AppError("NOT_FOUND", `Unknown task: ${taskId}`);

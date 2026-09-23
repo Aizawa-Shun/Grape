@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { SaasAnalysis } from "./analysis";
 import { contextFromAnalysis } from "./derive";
+import { GAP_PRICING_UNSTATED, GAP_WHO_UNSTATED } from "./gaps";
 import { UNSTATED } from "./unstated";
+
+const axis = (score: number) => ({ score, comment: "理由" });
 
 function analysis(overrides: Partial<SaasAnalysis> = {}): SaasAnalysis {
   return {
@@ -28,6 +31,16 @@ function analysis(overrides: Partial<SaasAnalysis> = {}): SaasAnalysis {
       similarServices: { items: [], status: "unknown" },
     },
     insights: { strengths: [], differentiation: [], userNeeds: [], opportunities: [] },
+    assessment: {
+      clarity: axis(4),
+      audience: axis(2),
+      differentiation: axis(3),
+      credibility: axis(2),
+      action: axis(4),
+      monetization: axis(1),
+      summary: "総評",
+      priority: "最優先",
+    },
     evidence: [
       { topic: "service.what", url: "https://example.com/", quote: "Play chess", reasoning: "理由" },
       { topic: "service.who", url: "https://example.com/rules", quote: "Rules", reasoning: "理由" },
@@ -45,15 +58,24 @@ describe("contextFromAnalysis", () => {
   });
 
   /**
-   * intelligence/audit.ts compares against this exact literal to decide
-   * whether a landing page states a value proposition at all. A
-   * different-but-similar string would silently pass every site.
+   * The behaviour this replaced blanked the field to `UNSTATED`, which reached
+   * the reader as an empty row on the one screen that exists to tell them what
+   * Grape believes their product is. The reading is kept; what the site failed
+   * to say is recorded in `gaps` instead, and the test below holds that half
+   * of the bargain.
    */
-  it("writes unknown claims as the exact sentinel the site audit compares against", () => {
+  it("keeps an unknown claim's reading rather than blanking the field", () => {
     const source = analysis();
-    source.service.who = { value: "未確認", status: "unknown" };
+    source.service.who = { value: "チェスを覚えたい初心者と推測される", status: "unknown" };
 
-    expect(contextFromAnalysis(source).who).toBe(UNSTATED);
+    expect(contextFromAnalysis(source).who).toBe("チェスを覚えたい初心者と推測される");
+  });
+
+  it("still records an unknown claim as a gap, which is what the site audit reads", () => {
+    const source = analysis();
+    source.service.who = { value: "チェスを覚えたい初心者と推測される", status: "unknown" };
+
+    expect(contextFromAnalysis(source).gaps).toContain(GAP_WHO_UNSTATED);
   });
 
   it("treats an empty value as unstated even when the model called it confirmed", () => {
@@ -92,8 +114,8 @@ describe("contextFromAnalysis", () => {
   it("reports only genuine unknowns as gaps", () => {
     const gaps = contextFromAnalysis(analysis()).gaps;
 
-    expect(gaps).toContain("料金が明示されていません");
-    expect(gaps.some((gap) => gap.includes("誰向け"))).toBe(false);
+    expect(gaps).toContain(GAP_PRICING_UNSTATED);
+    expect(gaps).not.toContain(GAP_WHO_UNSTATED);
   });
 
   it("scores confirmed above inferred above unknown", () => {

@@ -53,8 +53,12 @@ export class AnthropicProvider implements LLMProvider {
     // mean retry and timeout behaviour varying by provider — the exact thing
     // the provider interface exists to hide.
     const shared = { timeout: options.timeoutMs ?? currentSettings().LLM_TIMEOUT_MS, maxRetries: 1 };
-    // A bare constructor resolves ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or an
-    // `ant auth login` profile on its own; only override when a key is given.
+    // `getProvider()` (core/llm/index.ts) always passes the calling account's
+    // own key — it refuses to build this provider at all otherwise, since
+    // there is no keyless Anthropic endpoint. Left optional here only so a
+    // bare constructor still falls back to ANTHROPIC_API_KEY / an `ant auth
+    // login` profile for anything outside the app proper, like a one-off
+    // script.
     this.#client = new Anthropic(
       options.apiKey ? { ...shared, apiKey: options.apiKey } : shared,
     );
@@ -201,7 +205,7 @@ function anthropicFailure(error: unknown): LLMFailure {
 function describeAnthropicError(error: unknown): string {
   // Typed exception classes, most specific first — never string-match messages.
   if (error instanceof Anthropic.AuthenticationError) {
-    return "authentication failed — set ANTHROPIC_API_KEY or run `ant auth login`";
+    return "authentication failed — the API key on file for this account is missing or invalid; update it from /account";
   }
   if (error instanceof Anthropic.RateLimitError) return "rate limited";
   if (error instanceof Anthropic.NotFoundError) return "model not found";

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseEnv } from "./env";
+import { isLocalHost, parseEnv } from "./env";
 
 describe("parseEnv", () => {
   it("runs on defaults alone, so a fresh checkout starts without configuration", () => {
@@ -19,14 +19,11 @@ describe("parseEnv", () => {
     expect(parseEnv({}).LLM_PROVIDER).toBeUndefined();
   });
 
-  it("refuses anthropic with no ANTHROPIC_API_KEY, since AI is opt-in, not opt-out", () => {
-    expect(() => parseEnv({ LLM_PROVIDER: "anthropic" })).toThrow(/ANTHROPIC_API_KEY/);
-  });
-
-  it("allows anthropic once ANTHROPIC_API_KEY is set", () => {
-    expect(() =>
-      parseEnv({ LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-ant-test" }),
-    ).not.toThrow();
+  it("allows anthropic on its own, with no instance-wide key to check any more", () => {
+    // API keys moved out of Env and into a per-account column (see
+    // core/auth/users.ts) — LLM_PROVIDER only says which service is in play,
+    // not who can actually call it, so the schema has nothing left to refuse.
+    expect(() => parseEnv({ LLM_PROVIDER: "anthropic" })).not.toThrow();
   });
 
   /**
@@ -66,19 +63,26 @@ describe("parseEnv", () => {
     expect(parseEnv({ GRAPE_ACTION_DRY_RUN: "0" }).GRAPE_ACTION_DRY_RUN).toBe(true);
   });
 
-  it("refuses a remote openai-compat endpoint with no key, which cannot work", () => {
+  it("allows a remote openai-compat endpoint on its own, same as anthropic above", () => {
     expect(() =>
       parseEnv({ LLM_PROVIDER: "openai-compat", OPENAI_BASE_URL: "https://api.openai.com/v1" }),
-    ).toThrow(/OPENAI_API_KEY/);
+    ).not.toThrow();
   });
 
-  it("allows a local openai-compat endpoint with no key, because LM Studio needs none", () => {
-    const env = parseEnv({
-      LLM_PROVIDER: "openai-compat",
-      OPENAI_BASE_URL: "http://localhost:1234/v1",
+  describe("isLocalHost", () => {
+    it("recognises every loopback spelling getProvider's openai-compat exemption relies on", () => {
+      for (const url of [
+        "http://localhost:1234/v1",
+        "http://127.0.0.1:1234/v1",
+        "http://[::1]:1234/v1",
+      ]) {
+        expect(isLocalHost(url), url).toBe(true);
+      }
     });
 
-    expect(env.OPENAI_API_KEY).toBeUndefined();
+    it("does not treat a real host as local", () => {
+      expect(isLocalHost("https://api.openai.com/v1")).toBe(false);
+    });
   });
 
   it("allows neither GOOGLE_CLIENT_ID nor GOOGLE_CLIENT_SECRET, the ordinary no-Google-login case", () => {

@@ -46,17 +46,19 @@ const EnvSchema = z.object({
   // --- Intelligence layer -------------------------------------------------
   /**
    * Unset by default — AI is opt-in, not a thing a fresh checkout is quietly
-   * running against. Product understanding without this configured falls
-   * back to the rule-based reading of the page itself (core/context/extract.ts);
+   * running against. Picks *which* service and model Grape talks to; it says
+   * nothing about credentials any more. Each account brings its own API key
+   * from /account (see core/auth/users.ts's setLlmApiKey / getLlmApiKey), so a
+   * provider being chosen here does not by itself mean any given user can
+   * actually call it — `getProvider()` (core/llm/index.ts) is what checks
+   * that, per request, for whoever is asking. Product understanding with
+   * neither a provider selected nor a key on file falls back to the
+   * rule-based reading of the page itself (core/context/extract.ts);
    * diagnosis, task recommendation and artifact generation simply refuse with
-   * a clear error until a provider is chosen (see LLM_NOT_CONFIGURED). Picking
-   * a value is not enough on its own either — the superRefine rules below
-   * still require that provider's own credentials to be set, so this can never
-   * be "on" without something behind it.
+   * a clear error until both are in place (see LLM_NOT_CONFIGURED).
    */
   LLM_PROVIDER: z.enum(LLM_PROVIDER_NAMES).optional(),
 
-  ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_MODEL: z.string().default("claude-opus-5"),
 
   /**
@@ -87,7 +89,6 @@ const EnvSchema = z.object({
   LLM_MONTHLY_BUDGET_USD: z.coerce.number().positive().default(10),
 
   OPENAI_BASE_URL: httpUrl("https://api.openai.com/v1"),
-  OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default("gpt-4o-mini"),
 
   // --- Data layer ---------------------------------------------------------
@@ -153,37 +154,29 @@ const EnvSchema = z.object({
 });
 
 /**
+ * Whether a URL's host is loopback — a self-hosted server (LM Studio, vLLM,
+ * llama.cpp) that genuinely has no key to give. Exported so
+ * core/llm/index.ts can apply the same exemption when it decides whether a
+ * user's missing openai-compat key is actually a problem; kept here rather
+ * than duplicated because OPENAI_BASE_URL's shape is this module's to know.
+ */
+export function isLocalHost(url: string): boolean {
+  const host = new URL(url).hostname;
+  return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
+}
+
+/**
  * Cross-field rules the per-field schema cannot express.
  *
- * Picking a provider is deliberately not enough by itself to turn AI on: each
- * provider must also have its own credential, so `LLM_PROVIDER` can never be
- * "chosen" without something real behind it. `anthropic` always needs
- * `ANTHROPIC_API_KEY` — there is no local, keyless Anthropic endpoint, unlike
- * openai-compat's `localhost` exemption below, which exists because a
- * self-hosted server (LM Studio, vLLM) genuinely has no key to give it.
+ * API keys used to live here too — `anthropic` required `ANTHROPIC_API_KEY`,
+ * `openai-compat` required `OPENAI_API_KEY` unless the endpoint was local —
+ * back when one instance-wide credential served every account. Now each
+ * account brings its own key (core/auth/users.ts), so there is nothing left
+ * for this schema to cross-check: `LLM_PROVIDER` alone says which service is
+ * in play, and `getProvider()` is where a *specific user's* credential is
+ * required or not.
  */
 const CheckedEnvSchema = EnvSchema.superRefine((value, ctx) => {
-  if (value.LLM_PROVIDER === "anthropic" && !value.ANTHROPIC_API_KEY) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["ANTHROPIC_API_KEY"],
-      message: "required when LLM_PROVIDER=anthropic",
-    });
-  }
-}).superRefine((value, ctx) => {
-  if (value.LLM_PROVIDER !== "openai-compat") return;
-  if (value.OPENAI_API_KEY) return;
-
-  const host = new URL(value.OPENAI_BASE_URL).hostname;
-  const isLocal = host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
-  if (isLocal) return;
-
-  ctx.addIssue({
-    code: "custom",
-    path: ["OPENAI_API_KEY"],
-    message: `required when LLM_PROVIDER=openai-compat and OPENAI_BASE_URL points at ${host}`,
-  });
-}).superRefine((value, ctx) => {
   // Half a pair is worse than neither half: it would show a "Googleでログイン"
   // button that fails every attempt with a Google-side "invalid_client",
   // rather than one that simply does not appear.
@@ -200,10 +193,11 @@ const CheckedEnvSchema = EnvSchema.superRefine((value, ctx) => {
 export type Env = z.infer<typeof EnvSchema>;
 
 /**
- * The one place "is AI on" gets decided. `LLM_PROVIDER` being set is enough to
- * ask this — the superRefine rules above already guarantee that a set
- * provider has its own credential, so this never has to re-check
- * ANTHROPIC_API_KEY / OPENAI_API_KEY itself.
+ * Whether the instance has picked a service to talk to at all. `LLM_PROVIDER`
+ * being set no longer guarantees a working credential the way it did when one
+ * instance-wide key served every account — each user's own key (or lack of
+ * one) is checked separately, per request, by `getProvider()` in
+ * core/llm/index.ts.
  */
 export function aiAvailable(settings: Pick<Env, "LLM_PROVIDER">): boolean {
   return settings.LLM_PROVIDER !== undefined;

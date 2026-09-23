@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CrawledPage } from "@/core/context/crawl";
 import { UNSTATED } from "@/core/context/extract";
+import { GAP_WHO_UNSTATED } from "@/core/context/gaps";
 
 import { runSiteAudit, type AuditContextInput } from "./audit";
 
@@ -50,6 +51,22 @@ describe("runSiteAudit", () => {
     const finding = findingFor(findings, "value_proposition");
     expect(finding.passed).toBe(false);
     expect(finding.detail).toContain("誰向けか明示されていない");
+  });
+
+  /**
+   * The AI path fills every field, so a site that says nothing about its
+   * audience still arrives here with a sentence in `who` — the model's reading
+   * of it. Only `gaps` still says the site itself never stated it, and a check
+   * that looked at the text alone would pass every site read by a model.
+   */
+  it("fails value_proposition when the text is filled but gaps report the site never stated it", () => {
+    const findings = runSiteAudit([page()], {
+      what: "ブラウザでチェスを対局できるサービスである",
+      who: "チェスを覚えたい初心者と推測される",
+      gaps: [GAP_WHO_UNSTATED],
+    });
+
+    expect(findingFor(findings, "value_proposition").passed).toBe(false);
   });
 
   it("passes meta_description from a plain description, OGP, or the manifest", () => {

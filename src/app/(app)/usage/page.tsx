@@ -16,10 +16,13 @@ export const dynamic = "force-dynamic";
  * used to link to a プランと請求 screen promising a plan and an invoice, and a
  * test still keeps that gone, because there is no such thing to show.
  *
- * What there is instead is a real number with a real cause: the AI calls this
- * instance made, estimated against list prices, against the ceiling in
- * settings. /settings shows the total beside the limit, which is the setting;
- * this answers the question you have after reading it — where did it go.
+ * What there is instead is a real number with a real cause: the AI calls the
+ * viewer's own account made, estimated against list prices, against the
+ * ceiling in settings. Scoped per account because each one now calls the
+ * model on its own API key (see /account) — there is no single instance-wide
+ * bill left to show. /settings shows the same total beside the limit it is
+ * checked against; this answers the question you have after reading it —
+ * where did it go.
  */
 
 const TASK_LABELS: Record<string, string> = {
@@ -72,8 +75,11 @@ function Breakdown({ rows, label }: { rows: SpendGroup[]; label: (key: string) =
 }
 
 export default async function UsagePage() {
-  await requireUser();
-  const usage = await monthUsage();
+  const user = await requireUser();
+  // Your own usage, not the whole instance's: each account now calls the
+  // model on its own API key (see /account), and that is also the boundary
+  // the monthly cap is checked against (core/llm/budget.ts).
+  const usage = await monthUsage(undefined, undefined, user.id);
 
   const ratio = usage.budgetUsd > 0 ? usage.spentUsd / usage.budgetUsd : 0;
   const exhausted = usage.spentUsd >= usage.budgetUsd;
@@ -82,7 +88,7 @@ export default async function UsagePage() {
     <Page>
       <PageHeader
         title="AI利用料"
-        description="今月このGrapeが使ったAIの見積り額です。実際の請求額とは差が出ます。"
+        description="今月あなたが使ったAIの見積り額です。実際の請求額とは差が出ます。"
       />
 
       <Section title="今月">

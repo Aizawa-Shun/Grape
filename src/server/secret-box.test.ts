@@ -1,0 +1,50 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/env", () => ({
+  env: { GRAPE_SESSION_SECRET: undefined as string | undefined },
+}));
+
+afterEach(() => {
+  vi.resetModules();
+});
+
+describe("encryptSecret / decryptSecret", () => {
+  it("round-trips a plaintext API key", async () => {
+    const { env } = await import("@/env");
+    env.GRAPE_SESSION_SECRET = "test-secret";
+
+    const { encryptSecret, decryptSecret } = await import("./secret-box");
+    const ciphertext = encryptSecret("sk-ant-abc123");
+
+    expect(ciphertext).not.toContain("sk-ant-abc123");
+    expect(decryptSecret(ciphertext)).toBe("sk-ant-abc123");
+  });
+
+  it("produces a different ciphertext each time, so two rows never look identical", async () => {
+    const { env } = await import("@/env");
+    env.GRAPE_SESSION_SECRET = "test-secret";
+
+    const { encryptSecret } = await import("./secret-box");
+    expect(encryptSecret("sk-ant-abc123")).not.toBe(encryptSecret("sk-ant-abc123"));
+  });
+
+  it("fails to decrypt once GRAPE_SESSION_SECRET changes underneath it", async () => {
+    const { env } = await import("@/env");
+    env.GRAPE_SESSION_SECRET = "first-secret";
+    const { encryptSecret, decryptSecret } = await import("./secret-box");
+    const ciphertext = encryptSecret("sk-ant-abc123");
+
+    env.GRAPE_SESSION_SECRET = "second-secret";
+    expect(() => decryptSecret(ciphertext)).toThrow();
+  });
+
+  it("falls back to the well-known development secret when unset, same as session.ts", async () => {
+    const { env } = await import("@/env");
+    env.GRAPE_SESSION_SECRET = undefined;
+
+    const { encryptSecret, decryptSecret } = await import("./secret-box");
+    const ciphertext = encryptSecret("sk-ant-abc123");
+
+    expect(decryptSecret(ciphertext)).toBe("sk-ant-abc123");
+  });
+});

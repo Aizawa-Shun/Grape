@@ -1,4 +1,5 @@
 import { UNSTATED } from "@/core/context/extract";
+import { GAP_WHAT_UNSTATED, GAP_WHO_UNSTATED } from "@/core/context/gaps";
 
 /**
  * The cold-start path (spec section 6). A brand-new product has no funnel —
@@ -66,12 +67,23 @@ export function runSiteAudit(pages: AuditPageInput[], context: AuditContextInput
 
 /**
  * Reuses the Product Context extraction rather than re-deriving it from HTML:
- * that extraction already applied the "do not invent, list what's missing as
- * a gap" discipline (extract.ts), so asking the same question twice in two
- * different ways would only add noise.
+ * that extraction already decided what the site does and does not state, so
+ * asking the same question twice in two different ways would only add noise.
+ *
+ * Two sources for one question, because there are two extraction paths. The
+ * rule-based reading (no model configured) leaves a field it could not fill as
+ * `UNSTATED` and the text is the signal. A model analysis always fills the
+ * text — a site that never says who it is for still gets the model's best
+ * reading of who it is for — and records the omission in `gaps` instead
+ * (context/derive.ts). Checking only the first would pass every AI-read site;
+ * checking only the second would pass every rule-read one.
  */
 function valuePropositionFinding(context: AuditContextInput): AuditFinding {
-  const stated = context.what !== UNSTATED && context.who !== UNSTATED;
+  const blank = context.what === UNSTATED || context.who === UNSTATED;
+  const reportedMissing =
+    context.gaps.includes(GAP_WHAT_UNSTATED) || context.gaps.includes(GAP_WHO_UNSTATED);
+  const stated = !blank && !reportedMissing;
+
   return {
     check: "value_proposition",
     passed: stated,

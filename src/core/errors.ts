@@ -35,7 +35,13 @@ export const ERROR_CODES = [
   "LLM_BAD_OUTPUT",
   "LLM_REFUSED",
   "LLM_BUDGET_EXCEEDED",
-  /** No LLM_PROVIDER is set at all — distinct from LLM_AUTH, which means one is set but its credential is bad. */
+  /**
+   * Nothing usable is on hand yet to make this call: no LLM_PROVIDER selected
+   * at the instance level, no signed-in account, or — now that each account
+   * brings its own key (core/auth/users.ts) — a provider is selected but this
+   * particular account has not added a key for it. Distinct from LLM_AUTH,
+   * which means a key exists but the model rejected it.
+   */
   "LLM_NOT_CONFIGURED",
 
   "CHANNEL_AUTH",

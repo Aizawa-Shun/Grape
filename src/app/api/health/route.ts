@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { getProvider, llmAvailable } from "@/core/llm";
+import { AppError } from "@/core/errors";
+import { getProvider, llmAvailable, type ProviderHealth } from "@/core/llm";
 import { dbReady, sqlClient } from "@/db/client";
 import { describeMigrationStatus, migrationStatus, readJournal } from "@/db/migration-status";
 import { loadSettings } from "@/core/settings";
@@ -43,7 +44,7 @@ export async function GET(request: Request) {
     ? { ok: true, provider: settings.LLM_PROVIDER, model: "(skipped)", detail: "skipped via ?llm=0" }
     : !llmAvailable()
       ? { ok: true, provider: "(none)", model: "(none)", detail: "AI is not configured (opt-in)" }
-      : await getProvider().health();
+      : await checkLlm();
 
   const ok = database.ok && llm.ok;
 
@@ -61,6 +62,25 @@ export async function GET(request: Request) {
     },
     { status: ok ? 200 : 503 },
   );
+}
+
+/**
+ * `getProvider()` can now fail for a reason this endpoint should not report
+ * as broken: the instance has AI selected, but the signed-in account making
+ * this request has not added their own API key yet (see core/llm/index.ts).
+ * That is a fact about this account, not about whether the model is
+ * reachable, so it is reported the same way "AI is not configured" above is —
+ * `ok: true`, with a detail explaining why nothing was actually called.
+ */
+async function checkLlm(): Promise<ProviderHealth> {
+  try {
+    return await (await getProvider()).health();
+  } catch (error) {
+    if (error instanceof AppError && error.code === "LLM_NOT_CONFIGURED") {
+      return { ok: true, provider: "(unavailable)", model: "(none)", detail: error.message };
+    }
+    throw error;
+  }
 }
 
 /**

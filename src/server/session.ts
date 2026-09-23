@@ -45,7 +45,7 @@ export const DEV_USER_ID = "dev";
  * localhost in a non-production build, and the threat was never the loopback
  * interface.
  */
-const DEV_SECRET = "grape-development-only-never-in-production";
+export const DEV_SECRET = "grape-development-only-never-in-production";
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 

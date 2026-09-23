@@ -65,7 +65,11 @@ const CATALOG: Record<ErrorCode, Entry> = {
 
   LLM_NOT_CONFIGURED: {
     status: 503,
-    text: "AIが設定されていません。設定画面でAIの接続先とAPIキーを設定してください。",
+    // Deliberately generic: "not configured" now covers three different
+    // fixes (pick a provider, sign in, or add your own key), each of them
+    // someone else's to make in two of the three cases — the throw site's
+    // hint is what actually says which. See core/llm/index.ts's getProvider.
+    text: "AIが使えません。設定を確認してください。",
   },
   LLM_UNREACHABLE: {
     status: 503,

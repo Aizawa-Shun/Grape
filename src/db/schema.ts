@@ -78,6 +78,14 @@ export type UserRole = (typeof USER_ROLES)[number];
  * check would need to remember to guard. `googleId` is nullable and unique —
  * unique so the same Google account cannot attach to two rows, nullable
  * because most rows here predate Google sign-in and plenty will never use it.
+ *
+ * `anthropicApiKey` / `openaiApiKey` are each that account's own credential
+ * for calling the model — see core/auth/users.ts's setLlmApiKey/getLlmApiKey.
+ * Unlike passwordHash, this has to come back out whole, so it is encrypted
+ * (server/secret-box.ts) rather than hashed, and unlike GRAPE_SESSION_SECRET
+ * or the X credentials it deliberately does live in this database: it is
+ * per-account, and there is no single value in .env that could stand in for
+ * every account's own key.
  */
 export const users = sqliteTable(
   "users",
@@ -88,6 +96,8 @@ export const users = sqliteTable(
     passwordHash: text("password_hash").notNull(),
     googleId: text("google_id"),
     role: text("role", { enum: USER_ROLES }).notNull().default("member"),
+    anthropicApiKey: text("anthropic_api_key"),
+    openaiApiKey: text("openai_api_key"),
     createdAt: createdAt(),
     lastLoginAt: integer("last_login_at", { mode: "timestamp_ms" }),
   },

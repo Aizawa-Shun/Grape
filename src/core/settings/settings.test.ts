@@ -3,10 +3,13 @@ import { describe, expect, it } from "vitest";
 import { OVERRIDABLE_KEYS, isOverridable, publicSettings, resolveSettings } from "./index";
 
 describe("OVERRIDABLE_KEYS", () => {
-  it("excludes every secret, so an auth bypass cannot read or rewrite one", () => {
+  it("excludes every instance-wide secret, so an auth bypass cannot read or rewrite one", () => {
+    // The LLM API keys used to belong on this list too, back when one of them
+    // was an instance-wide secret in .env. They are not Env fields at all any
+    // more — each account has its own, in users.anthropicApiKey /
+    // users.openaiApiKey (core/auth/users.ts), reached through /account, not
+    // through this settings layer.
     for (const secret of [
-      "ANTHROPIC_API_KEY",
-      "OPENAI_API_KEY",
       "GRAPE_SESSION_SECRET",
       "X_CONSUMER_KEY",
       "X_CONSUMER_SECRET",
@@ -63,36 +66,24 @@ describe("resolveSettings", () => {
     expect(() => resolveSettings({}, { LLM_PROVIDER: "gpt5" })).toThrow(/LLM_PROVIDER/);
   });
 
-  it("refuses anthropic from the web with no key configured, the same as the file would", () => {
-    expect(() => resolveSettings({}, { LLM_PROVIDER: "anthropic" })).toThrow(/ANTHROPIC_API_KEY/);
-    expect(() =>
-      resolveSettings({ ANTHROPIC_API_KEY: "sk-ant-test" }, { LLM_PROVIDER: "anthropic" }),
-    ).not.toThrow();
-  });
-
-  it("still enforces the cross-field rule that involves a secret it cannot set", () => {
-    // Switching to a remote openai-compat endpoint from the web is refused
-    // when the key it needs is not in .env, rather than silently producing a
-    // configuration that cannot work.
+  it("allows picking either provider from the web with no credential to cross-check here any more", () => {
+    // Both used to need one — anthropic always, openai-compat unless the
+    // endpoint was local — back when the key lived in this same Env schema.
+    // It is a per-account database column now (core/auth/users.ts), so
+    // resolveSettings has nothing left to refuse.
+    expect(() => resolveSettings({}, { LLM_PROVIDER: "anthropic" })).not.toThrow();
     expect(() =>
       resolveSettings({}, { LLM_PROVIDER: "openai-compat", OPENAI_BASE_URL: "https://api.openai.com/v1" }),
-    ).toThrow(/OPENAI_API_KEY/);
-
-    expect(() =>
-      resolveSettings(
-        { OPENAI_API_KEY: "sk-test" },
-        { LLM_PROVIDER: "openai-compat", OPENAI_BASE_URL: "https://api.openai.com/v1" },
-      ),
     ).not.toThrow();
   });
 
   it("ignores a key that is not overridable, even if one is stored", () => {
     const settings = resolveSettings(
-      { ANTHROPIC_API_KEY: "sk-ant-from-env" },
-      { ANTHROPIC_API_KEY: "sk-ant-from-db" } as never,
+      { GRAPE_SESSION_SECRET: "from-env" },
+      { GRAPE_SESSION_SECRET: "from-db" } as never,
     );
 
-    expect(settings.ANTHROPIC_API_KEY).toBe("sk-ant-from-env");
+    expect(settings.GRAPE_SESSION_SECRET).toBe("from-env");
   });
 
   it("lets a stored value flip the dry-run flag, same as any other overridable key", () => {
@@ -107,10 +98,12 @@ describe("resolveSettings", () => {
 
 describe("publicSettings", () => {
   it("carries no secret, whatever else is on the object", () => {
+    // The LLM API keys are not tested here any more: they are not Env fields
+    // at all (see core/auth/users.ts), so putting one in `source` would prove
+    // nothing about publicSettings — it would just be silently dropped by
+    // parseEnv before this function ever saw it.
     const settings = resolveSettings(
       {
-        ANTHROPIC_API_KEY: "sk-ant-should-never-leave",
-        OPENAI_API_KEY: "sk-openai-secret",
         GRAPE_SESSION_SECRET: "signing-key",
         X_CONSUMER_SECRET: "x-secret",
         DATABASE_URL: "file:./grape.db",
@@ -120,12 +113,7 @@ describe("publicSettings", () => {
 
     const serialized = JSON.stringify(publicSettings(settings));
 
-    for (const secret of [
-      "sk-ant-should-never-leave",
-      "sk-openai-secret",
-      "signing-key",
-      "x-secret",
-    ]) {
+    for (const secret of ["signing-key", "x-secret"]) {
       expect(serialized, secret).not.toContain(secret);
     }
   });

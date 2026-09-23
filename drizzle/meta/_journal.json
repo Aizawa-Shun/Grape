@@ -64,6 +64,13 @@
       "when": 1789098666816,
       "tag": "0008_abnormal_warbird",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1789735462752,
+      "tag": "0009_new_magma",
+      "breakpoints": true
     }
   ]
 }

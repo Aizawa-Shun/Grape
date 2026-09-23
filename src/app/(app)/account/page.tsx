@@ -1,9 +1,11 @@
 import { Card } from "@/components/ui/card";
 import { Page, PageHeader, Section } from "@/components/ui/page";
+import { hasLlmApiKeys } from "@/core/auth/users";
 import { requireUser } from "@/server/auth/current-user";
 import { hasPassword } from "@/server/auth/password";
 
 import { PasswordForm, ProfileForm } from "./account-form";
+import { LlmKeyForm } from "./llm-key-form";
 
 export const dynamic = "force-dynamic";
 
@@ -21,12 +23,13 @@ export const dynamic = "force-dynamic";
  */
 export default async function AccountPage() {
   const user = await requireUser();
+  const llmKeyStatus = await hasLlmApiKeys(user.id);
 
   return (
     <Page>
       <PageHeader
         title="アカウント"
-        description="ログインに使う情報です。このGrapeの中だけで完結していて、どこにも送られません。"
+        description="ログインに使う情報です。名前・メール・パスワードはこのGrapeの中だけで完結していて、どこにも送られません。"
       />
 
       <Section
@@ -59,6 +62,15 @@ export default async function AccountPage() {
           </Card>
         </Section>
       )}
+
+      <Section
+        title="AIのAPIキー"
+        description="診断・タスクの提案・文面の作成でAIを呼ぶときに使う、あなた自身のキーです。/settingsでどのサービスを使うか選んだうえで、ここにキーを設定してください。ここだけはGrapeの外——選んだAI事業者——に送られます。"
+      >
+        <Card>
+          <LlmKeyForm status={llmKeyStatus} />
+        </Card>
+      </Section>
     </Page>
   );
 }

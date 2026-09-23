@@ -158,7 +158,7 @@ async function readSite(
   }
 
   try {
-    const analysis = await analyzeSaas(pages, getProvider());
+    const analysis = await analyzeSaas(pages, await getProvider());
     return { extraction: contextFromAnalysis(analysis), analysis };
   } catch (error) {
     // A crawl that reached nothing is the caller's failure to report, not

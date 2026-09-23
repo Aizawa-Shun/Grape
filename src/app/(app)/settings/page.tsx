@@ -47,12 +47,17 @@ export default async function SettingsPage({
 
   const settings = await loadSettings();
   const overrides = currentOverrides();
-  const spentThisMonth = await monthSpendUsd();
+  // This account's own spend, not the whole instance's: each account calls
+  // the model on its own API key now (see /account), and that is also what
+  // LLM_MONTHLY_BUDGET_USD is checked against — see core/llm/budget.ts.
+  const spentThisMonth = await monthSpendUsd(undefined, undefined, user.id);
 
   const ingestReachable = !/localhost|127\.0\.0\.1/.test(settings.INGEST_BASE_URL);
+  // Anthropic/OpenAI-compat API keys used to be here too, back when one
+  // instance-wide credential served every account. They are per-account now
+  // (see /account) and never come from .env, so this list is down to the
+  // secrets that genuinely are instance-wide.
   const configuredKeys = [
-    { label: "Anthropic APIキー", set: Boolean(env.ANTHROPIC_API_KEY) },
-    { label: "OpenAI互換 APIキー", set: Boolean(env.OPENAI_API_KEY) },
     { label: "Xの認証情報", set: Boolean(env.X_CONSUMER_KEY && env.X_ACCESS_TOKEN) },
     { label: "セッション鍵", set: Boolean(env.GRAPE_SESSION_SECRET) },
   ];
@@ -97,8 +102,6 @@ export default async function SettingsPage({
         defaults={publicSettings(env)}
         overridden={Object.keys(overrides) as OverridableKey[]}
         monthSpendUsd={spentThisMonth}
-        hasAnthropicKey={Boolean(env.ANTHROPIC_API_KEY)}
-        hasOpenAIKey={Boolean(env.OPENAI_API_KEY)}
       />
 
       <div className="border-t border-border" />
@@ -107,9 +110,10 @@ export default async function SettingsPage({
         title="ここでは変えられないもの"
         description={
           <>
-            鍵は<code className="font-mono">.env</code>
+            ここに残っている鍵は<code className="font-mono">.env</code>
             を直接編集して、サーバーを再起動してください。練習モードだけは下で切り替えられます
-            — オフにする前に確認が出ます。
+            — オフにする前に確認が出ます。AIのAPIキーは各自のものなので、<code className="font-mono">/account</code>
+            で設定します。
           </>
         }
       >

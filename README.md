@@ -42,12 +42,13 @@ pnpm dev                  # http://localhost:3000
 
 **AIは既定でオフです。** `.env` の `LLM_PROVIDER` を設定するまで、診断のコメントや
 投稿文面の生成といったAI機能は使えません（プロダクト理解だけは、AIが無くても
-サイトの内容をそのまま整理する形で動きます）。使うときは `LLM_PROVIDER` と、
-対応するAPIキーの両方を設定してください。片方だけでは起動しません。
+サイトの内容をそのまま整理する形で動きます）。`LLM_PROVIDER` はどのサービス・
+モデルを使うかだけを決めるもので、APIキーはここには置きません。使う人それぞれが
+サインイン後に `/account` で自分のキーを設定します（下記「AIを使えるようにする」を参照）。
 
-- `anthropic` — `ANTHROPIC_API_KEY` が必須
+- `anthropic` — 各自 `/account` にキーが要ります
 - `openai-compat` — OpenAI / LM Studio / vLLM / llama.cpp など。`OPENAI_BASE_URL`
-  が `localhost` ならキー不要、それ以外は `OPENAI_API_KEY` が必須
+  が `localhost` ならキー不要、それ以外は各自 `/account` にキーが要ります
 
 ### サイトから訪問を届けるには
 
@@ -94,8 +95,9 @@ pnpm tunnel               # https://....trycloudflare.com が表示されます
    - `DATABASE_AUTH_TOKEN` — 手順2のトークン
    - `GRAPE_SESSION_SECRET` — **必須**。これが無いと、公開URLからは全部503になります
      （Renderが自動生成するので、そのままで構いません）
-   - `ANTHROPIC_API_KEY` — 空のままでも構いません。AIは既定でオフで、後から
-     `LLM_PROVIDER` と一緒に設定できます（下記「AIを使えるようにする」を参照）
+   - `LLM_PROVIDER` は空のままでも構いません。AIは既定でオフで、後から設定できます
+     （下記「AIを使えるようにする」を参照）。APIキーはRender側の環境変数ではなく、
+     各自が `/account` で設定します
 6. 初回デプロイ後、割り当てられた `https://....onrender.com` を開いて、
    **最初のアカウントを作る**（先に開いた人がオーナーになります）
 7. `/settings` の「計測用のコード」をコピーして、自分のサイトに貼る
@@ -118,16 +120,20 @@ AIは既定でオフです。プロダクト理解（何を・誰に・なぜ・
 サイトのmeta descriptionやタイトルをそのまま整理する形で動きますが、診断の
 コメントや投稿文面の生成はAIを設定するまで使えません。
 
-Render の Environment に、以下を**両方**設定してください（片方だけでは
-起動しません）。
+まず、どのサービスを使うか選びます。Render の Environment（または `.env`）に
+設定するのは、これ一つだけです。
 
 ```bash
 LLM_PROVIDER=anthropic
-ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 `openai-compat`（OpenAI本体やLM Studioなど）を使う場合は、代わりに
-`LLM_PROVIDER=openai-compat` と `OPENAI_API_KEY` を設定します。
+`LLM_PROVIDER=openai-compat` を設定します。
+
+APIキーはここには置きません。使う人それぞれが、サインイン後に `/account` の
+「AIのAPIキー」から自分のキーを設定します。ひとつの Grape を複数人で使っていても、
+誰がどれだけAI呼び出しにお金を使ったかは各自の `/settings` の見積り上限と `/usage`
+に、自分の分だけが出ます。
 
 ### Googleでログインできるようにする
 

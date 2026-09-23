@@ -140,7 +140,7 @@ export interface DiagnoseOptions {
 
 export async function diagnoseProduct(productId: string, options: DiagnoseOptions = {}): Promise<Diagnosis> {
   const conn = options.database ?? db;
-  const provider = options.provider ?? getProvider();
+  const provider = options.provider ?? (await getProvider());
 
   const product = await conn.query.products.findFirst({ where: eq(schema.products.id, productId) });
   if (!product) throw new AppError("NOT_FOUND", `Unknown product: ${productId}`);

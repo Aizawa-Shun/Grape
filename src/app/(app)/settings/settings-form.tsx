@@ -15,7 +15,7 @@ interface FieldSpec {
   key: OverridableKey;
   label: string;
   hint: string;
-  options?: { value: string; label: string; disabled?: boolean }[];
+  options?: { value: string; label: string }[];
   inputMode?: "numeric";
 }
 
@@ -32,21 +32,19 @@ interface Section {
  */
 /**
  * `monthSpendUsd` is only known at render time, so this is a function rather
- * than a constant. `hasAnthropicKey`/`hasOpenAIKey` gate the LLM_PROVIDER
- * options themselves — offering a provider with no credential behind it would
- * let someone "turn AI on" here and have it fail on the very next request,
- * which resolveSettings would reject anyway (see env.ts's superRefine); this
- * just keeps the rejection from being a surprise.
+ * than a constant.
+ *
+ * Nothing here gates the LLM_PROVIDER options on a credential any more: which
+ * service to use and who can actually call it are two different questions
+ * now that each account brings its own key (see /account). Picking a service
+ * with nobody's key on file yet just means AI stays unusable until someone
+ * adds one — the same "opt-in, not opt-out" shape as before, one level down.
  */
-function buildSections(
-  monthSpendUsd: number,
-  hasAnthropicKey: boolean,
-  hasOpenAIKey: boolean,
-): Section[] {
+function buildSections(monthSpendUsd: number): Section[] {
   return [
   {
     title: "AIの接続先",
-    description: "「なぜそうなっているか」の説明文と、投稿の文面を書く相手です。API キーを .env に設定していない接続先は選べません。",
+    description: "「なぜそうなっているか」の説明文と、投稿の文面を書く相手です。ここではどのサービス・モデルを使うかだけを選びます。実際に呼び出すには、使う人それぞれが/accountで自分のAPIキーを設定してください。",
     fields: [
       {
         key: "LLM_PROVIDER",
@@ -54,8 +52,8 @@ function buildSections(
         hint: "何も選ばなければAIは使わず、プロダクト理解はサイトの内容をそのまま整理するだけになります。",
         options: [
           { value: "", label: "使わない（AI機能はオフ）" },
-          { value: "anthropic", label: "Anthropic（Claude）", disabled: !hasAnthropicKey },
-          { value: "openai-compat", label: "OpenAI互換のサービス", disabled: !hasOpenAIKey },
+          { value: "anthropic", label: "Anthropic（Claude）" },
+          { value: "openai-compat", label: "OpenAI互換のサービス" },
         ],
       },
       { key: "ANTHROPIC_MODEL", label: "Anthropicのモデル名", hint: "例: claude-opus-5" },
@@ -67,16 +65,16 @@ function buildSections(
     title: "支出の上限",
     description: (
       <>
-        今月はこれまでに約{" "}
+        あなたは今月ここまでに約{" "}
         <span className="font-medium tabular-nums text-text">${monthSpendUsd.toFixed(2)}</span>{" "}
-        使っています（見積りなので、実際の請求額とは差が出ることがあります）。
+        使っています（見積りなので、実際の請求額とは差が出ることがあります）。上限は各自の利用に対してかかり、他の人の利用とは合算されません。
       </>
     ),
     fields: [
       {
         key: "LLM_MONTHLY_BUDGET_USD",
-        label: "毎月の上限額（ドル）",
-        hint: "この額に達すると、来月まで新しいAI呼び出しを止めます。",
+        label: "毎月の上限額（ドル、ひとりあたり）",
+        hint: "各アカウントの利用がこの額に達すると、そのアカウントのAI呼び出しだけを来月まで止めます。",
         inputMode: "numeric",
       },
     ],
@@ -153,8 +151,6 @@ export function SettingsForm({
   defaults,
   overridden,
   monthSpendUsd,
-  hasAnthropicKey,
-  hasOpenAIKey,
 }: {
   /** What is in effect right now. */
   values: SettingsValues;
@@ -163,16 +159,13 @@ export function SettingsForm({
   overridden: OverridableKey[];
   /** This calendar month's estimated LLM spend so far — see core/llm/budget.ts. */
   monthSpendUsd: number;
-  /** Whether each credential is set in .env — gates the LLM_PROVIDER options, since a key never crosses into this client bundle. */
-  hasAnthropicKey: boolean;
-  hasOpenAIKey: boolean;
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState<SettingsValues>(values);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  const sections = buildSections(monthSpendUsd, hasAnthropicKey, hasOpenAIKey);
+  const sections = buildSections(monthSpendUsd);
 
   const overriddenNow = new Set(overridden);
   const dirty = (Object.keys(draft) as OverridableKey[]).some((key) => draft[key] !== values[key]);
@@ -322,9 +315,8 @@ function Row({
             className={cx(control, "appearance-none")}
           >
             {field.options.map((option) => (
-              <option key={option.value} value={option.value} disabled={option.disabled}>
+              <option key={option.value} value={option.value}>
                 {option.label}
-                {option.disabled ? "（APIキー未設定）" : ""}
               </option>
             ))}
           </select>

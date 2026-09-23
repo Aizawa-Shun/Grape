@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Disclosure } from "@/components/ui/disclosure";
 import { Section } from "@/components/ui/page";
 import {
+  assessmentOf,
   evidenceFor,
   type AnalysisEvidence,
   type ClaimStatus,
@@ -12,6 +13,8 @@ import {
   type SaasAnalysis,
   type TextClaim,
 } from "@/core/context/analysis";
+
+import { AssessmentChart } from "./assessment-chart";
 
 /**
  * The analysis, read top-down: what this is, who for, what it costs, and only
@@ -47,7 +50,15 @@ function StatusBadge({ status }: { status: ClaimStatus }) {
   );
 }
 
-/** What an unknown claim shows instead of a value — short, and never a whole panel of its own. */
+/**
+ * What a claim with nothing in it falls back to.
+ *
+ * Rarely reached now: an analysis fills every field whatever its status, so a
+ * claim the site never stated arrives as the model's best reading with a
+ * 未確認 badge beside it rather than as a blank. This covers the older rows
+ * that were written when `unknown` meant an empty value, and a model that
+ * returns one in spite of the schema.
+ */
 const UNKNOWN_TEXT = "未確認";
 
 function Evidence({ items }: { items: AnalysisEvidence[] }) {
@@ -112,7 +123,7 @@ function TextRow({
 }) {
   return (
     <Row label={label} status={claim.status} evidence={evidence}>
-      {claim.status === "unknown" ? (
+      {claim.value.trim() === "" ? (
         <span className="text-text-subtle">{UNKNOWN_TEXT}</span>
       ) : (
         claim.value
@@ -181,6 +192,8 @@ function InsightList({ title, items }: { title: string; items: string[] }) {
 
 export function AnalysisReport({ analysis }: { analysis: SaasAnalysis }) {
   const { overview, service, targetUsers, business, market, insights } = analysis;
+  // Null for every row written before scoring existed — see assessmentOf.
+  const assessment = assessmentOf(analysis);
   const hasInsights =
     insights.strengths.length +
       insights.differentiation.length +
@@ -309,6 +322,21 @@ export function AnalysisReport({ analysis }: { analysis: SaasAnalysis }) {
           />
         </RowGroup>
       </Section>
+
+      {/*
+        The turn from "what this is" to "how it is doing". Above this line
+        everything is an account of the site; from here down it is judgment,
+        which is why the scorecard sits on this side of the boundary and
+        directly under a heading that says whose judgment it is.
+      */}
+      {assessment && (
+        <Section
+          title="現状の評価"
+          description="サイトを読んだAIが、6つの観点で5段階に採点したものです。事実ではなく判断なので、違うと思ったら内容を直してください。"
+        >
+          <AssessmentChart assessment={assessment} />
+        </Section>
+      )}
 
       {hasInsights && (
         <Section

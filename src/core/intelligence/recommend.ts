@@ -82,7 +82,7 @@ export interface RecommendOptions {
 
 export async function recommendTasks(diagnosis: Diagnosis, options: RecommendOptions = {}): Promise<Task[]> {
   const conn = options.database ?? db;
-  const provider = options.provider ?? getProvider();
+  const provider = options.provider ?? (await getProvider());
   const now = options.now ?? new Date();
 
   const product = await conn.query.products.findFirst({ where: eq(schema.products.id, diagnosis.productId) });
