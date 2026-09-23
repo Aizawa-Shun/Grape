@@ -56,6 +56,9 @@ export function ProductOnboarding() {
     initialDraftActionState
   );
   const [manualMode, setManualMode] = useState(false);
+  // Reactはアクション完了後に非制御フォームをリセットするため、制御コンポーネントにして
+  // 読み取り失敗時に入力済みのURLを保持する(入力し直しをさせない)。
+  const [url, setUrl] = useState("");
   // 下書き生成後に「URLの入力に戻る」を押した状態。useActionStateは外から
   // リセットできないため、表示側で無効化する。
   const [dismissedDraft, setDismissedDraft] = useState(false);
@@ -83,6 +86,8 @@ export function ProductOnboarding() {
               name="url"
               placeholder="https://example.com"
               autoFocus
+              value={url}
+              onChange={(event) => setUrl(event.target.value)}
               aria-invalid={draftState.status === "error"}
             />
           </FormField>
@@ -144,7 +149,8 @@ export function ProductOnboarding() {
 
       <ProductForm
         action={createProduct}
-        product={draft ? { ...draft, url: draftState.url } : undefined}
+        // 手動入力に切り替えた場合も、入力済みのURLは引き継ぐ。
+        product={draft ? { ...draft, url: draftState.url } : url ? { url } : undefined}
         submitLabel="登録する"
       />
 

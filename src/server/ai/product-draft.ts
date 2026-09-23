@@ -73,7 +73,12 @@ export async function draftProductFromUrl(rawUrl: string): Promise<DraftResult> 
 URL: ${page.url}
 
 ## ページ内容${page.truncated ? "(長いため冒頭のみ)" : ""}
-
+${
+  page.metadataOnly
+    ? "\n注意: このページはJavaScriptで表示されるため本文を取得できず、以下はタイトル・説明文などのメタ情報のみです。" +
+      "メタ情報から読み取れない項目は空文字にしてください。\n"
+    : ""
+}
 ${page.text}`,
       },
     ],

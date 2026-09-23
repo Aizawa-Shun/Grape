@@ -29,6 +29,7 @@ const page = {
   title: "Example",
   text: "ページ本文",
   truncated: false,
+  metadataOnly: false,
 };
 
 beforeEach(() => {
@@ -89,6 +90,18 @@ describe("draftProductFromUrl", () => {
     const result = await draftProductFromUrl("example.com");
     expect(result.draft.targetCustomer).toBe("");
     expect(result.draft.problem).toBe("");
+  });
+
+  it("本文が取れずメタ情報のみの場合は、その旨をAIに伝える", async () => {
+    mockFetchPageText.mockResolvedValue({ ...page, metadataOnly: true });
+    mockParse.mockResolvedValue({
+      stop_reason: "end_turn",
+      parsed_output: { name: "Cheeeess", description: "", targetCustomer: "", problem: "" },
+    });
+
+    await draftProductFromUrl("example.com");
+    const prompt = mockParse.mock.calls[0][0].messages[0].content as string;
+    expect(prompt).toMatch(/メタ情報のみ/);
   });
 
   it("ページを取得できない場合はPageFetchErrorがそのまま伝わる", async () => {

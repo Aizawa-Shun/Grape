@@ -56,7 +56,7 @@ export class AnalysisRefusedError extends Error {
 
 function buildUserMessage(
   product: Product,
-  page: { text: string; truncated: boolean } | undefined,
+  page: { text: string; truncated: boolean; metadataOnly: boolean } | undefined,
   fetchError: string | undefined
 ): string {
   const registered = [
@@ -71,8 +71,12 @@ function buildUserMessage(
     .map(([key, label]) => `- ${key}: ${label}`)
     .join("\n");
 
+  const metadataNote = page?.metadataOnly
+    ? "\n\n注意: このサイトはJavaScriptで表示されるため本文を取得できず、以下はタイトル・説明文などのメタ情報のみです。" +
+      "メタ情報と登録内容から判断できない項目は \"unknown\" としてください。"
+    : "";
   const pageSection = page
-    ? `## サイトから取得した内容${page.truncated ? "(長いため冒頭のみ)" : ""}\n\n${page.text}`
+    ? `## サイトから取得した内容${page.truncated ? "(長いため冒頭のみ)" : ""}${metadataNote}\n\n${page.text}`
     : `## サイトから取得した内容\n\n取得できませんでした(理由: ${fetchError ?? "不明"})。
 サイトの内容は判断材料に使えません。開発者の登録内容のみに基づいて分析し、
 サイトを見なければ分からない項目は "unknown" としてください。`;
@@ -95,11 +99,11 @@ ${categories}
 export async function analyzeProduct(product: Product): Promise<AnalysisResult> {
   const client = await getAnthropicClient();
 
-  let page: { text: string; truncated: boolean } | undefined;
+  let page: { text: string; truncated: boolean; metadataOnly: boolean } | undefined;
   let fetchError: string | undefined;
   try {
     const fetched = await fetchPageText(product.url);
-    page = { text: fetched.text, truncated: fetched.truncated };
+    page = { text: fetched.text, truncated: fetched.truncated, metadataOnly: fetched.metadataOnly };
   } catch (error) {
     // ページ取得の失敗は分析全体の失敗にしない。
     // 「取得できなかった」ことをAIにも利用者にも伝えた上で、登録内容のみで分析する。
