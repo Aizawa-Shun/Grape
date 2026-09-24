@@ -238,3 +238,58 @@ describe("TaskCard after a practice-mode approval", () => {
     expect(screen.getByRole("button", { name: "もう一度実行する" })).toBeInTheDocument();
   });
 });
+
+describe("TaskCard artifact kinds", () => {
+  it("lets a manual task choose what to write, and sends that choice", async () => {
+    const fetchMock = mockFetch();
+    render(
+      <TaskCard
+        task={task({ channel: "manual" })}
+        artifact={null}
+        actionRun={null}
+        costEstimateUsd={null}
+        outcome={null}
+        dryRun
+      />,
+    );
+
+    await userEvent.selectOptions(screen.getByLabelText("作る文面の種類"), "meta");
+    await userEvent.click(screen.getByRole("button", { name: "文面を作る" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/tasks/t1/artifact",
+      expect.objectContaining({ body: JSON.stringify({ kind: "meta" }) }),
+    );
+  });
+
+  it("offers no choice on an X task, which can only be a post", () => {
+    render(
+      <TaskCard
+        task={task({ channel: "x" })}
+        artifact={null}
+        actionRun={null}
+        costEstimateUsd={null}
+        outcome={null}
+        dryRun
+      />,
+    );
+
+    expect(screen.queryByLabelText("作る文面の種類")).not.toBeInTheDocument();
+  });
+
+  it("labels a generated text with its kind, so an email is not mistaken for page copy", () => {
+    render(
+      <TaskCard
+        task={task({ channel: "manual" })}
+        artifact={{ ...artifact, kind: "email", content: "件名: お知らせ\n\n本文" }}
+        actionRun={null}
+        costEstimateUsd={null}
+        outcome={null}
+        dryRun
+      />,
+    );
+
+    expect(screen.getByText("メール", { selector: "span" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "作り直す" })).toBeInTheDocument();
+  });
+});

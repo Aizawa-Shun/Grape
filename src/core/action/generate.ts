@@ -8,10 +8,13 @@ import { db, schema, type Database } from "@/db/client";
 import type { ArtifactKind, Channel } from "@/db/schema";
 
 import { X_POST_MAX_CHARS } from "./channels/x";
+import { CHANNEL_ARTIFACT_KINDS } from "./kinds";
+
+export { CHANNEL_ARTIFACT_KINDS } from "./kinds";
 
 /**
  * Turns an approved-for-work task into the actual deliverable: the tweet
- * text, the landing-page copy. This is where extract.ts's `primaryLanguage`
+ * text, the landing-page copy, the title and meta description, the email. This is where extract.ts's `primaryLanguage`
  * finally matters — unlike the diagnosis/recommendation narratives, which are
  * Grape's own advice to the developer and stay Japanese regardless, an
  * artifact is published where the product's own audience reads it.
@@ -24,11 +27,38 @@ const ArtifactContentSchema = z.object({
   content: z.string().min(1).describe("生成する文章の本文のみ。前置きや説明文は含めない。"),
 });
 
-/** Which artifact shape a task's channel produces. `manual` covers copy the human pastes somewhere themselves. */
-const CHANNEL_ARTIFACT_KIND: Record<Channel, ArtifactKind> = {
-  x: "x_post",
-  manual: "lp_copy",
-};
+/** The kind to generate: the one asked for if the channel allows it, else the channel's default. */
+export function artifactKindFor(channel: Channel, requested?: ArtifactKind): ArtifactKind {
+  const allowed = CHANNEL_ARTIFACT_KINDS[channel];
+  if (requested === undefined) return allowed[0];
+  if (!allowed.includes(requested)) {
+    throw new AppError("INVALID_INPUT", `A ${channel} task cannot produce a ${requested} artifact`, {
+      hint: "このタスクでは、その種類の文面は作れません。",
+    });
+  }
+  return requested;
+}
+
+/**
+ * Search-result limits, by the language the snippet is written in. Japanese
+ * is measured in characters and runs out far sooner on screen than English:
+ * a result title shows roughly 30 full-width characters, or 60 Latin ones.
+ */
+export function metaLimits(primaryLanguage: string): { title: number; description: number } {
+  return primaryLanguage.toLowerCase().startsWith("ja")
+    ? { title: 32, description: 120 }
+    : { title: 60, description: 160 };
+}
+
+const MetaContentSchema = z.object({
+  title: z.string().min(1).describe("検索結果とSNS共有で表示されるページタイトル。"),
+  description: z.string().min(1).describe("検索結果とSNS共有で表示される説明文（meta description）。"),
+});
+
+const EmailContentSchema = z.object({
+  subject: z.string().min(1).describe("メールの件名。"),
+  body: z.string().min(1).describe("メールの本文。宛名から署名まで、そのまま送れる形。"),
+});
 
 function generateSystemSuffix(kind: ArtifactKind, primaryLanguage: string): string {
   const languageRule = `本文はプロダクトの主要言語（${primaryLanguage}）で書く。Grape自体の管理画面が日本語であることとは関係ない — 読むのはこのプロダクトの利用者。`;
@@ -43,6 +73,37 @@ function generateSystemSuffix(kind: ArtifactKind, primaryLanguage: string): stri
 2. Product Contextに書かれていない機能・実績・数字を主張しない。
 3. 「必ず」「絶対に」のような誇張表現を避ける。
 4. ハッシュタグは0〜2個まで。
+5. ${languageRule}`;
+  }
+
+  if (kind === "meta") {
+    const limits = metaLimits(primaryLanguage);
+    return `
+
+あなたは上記プロダクトの成長担当です。以下のタスクを踏まえて、サイトのトップページに設定する
+<title> と meta description（OGPの og:title / og:description にも使う）を1組作成してください。
+これは自動送信されない — 人間がこの内容を見て自分でサイトに設定する。
+
+厳守すること:
+1. title は${limits.title}文字以内。サービス名と「何ができるか」が一目で分かるようにする。
+2. description は${limits.description}文字以内。誰の何を解決するかを具体的に書き、最後に次の行動（試す・登録する）につながる一言を入れる。
+3. Product Contextに書かれていない機能・実績・数字を主張しない。
+4. 「必ず」「絶対に」「No.1」のような誇張表現を避ける。
+5. ${languageRule}`;
+  }
+
+  if (kind === "email") {
+    return `
+
+あなたは上記プロダクトの成長担当です。以下のタスクを踏まえて、このプロダクトの利用者（または
+利用を検討している人）に送るメールを1通作成してください。
+これは自動送信されない — 人間がこの内容を見て自分で送る。
+
+厳守すること:
+1. 件名は短く、開く理由が分かるものにする。
+2. 本文は宛名・用件・次に取ってほしい行動（1つだけ）・署名の順で、そのまま送れる完成した文章にする。
+3. 宛名や差出人の名前など、分からない部分は［お名前］のような角括弧の空欄にする。作らない。
+4. Product Contextに書かれていない機能・実績・数字を主張しない。
 5. ${languageRule}`;
   }
 
@@ -81,9 +142,63 @@ export function truncateToLimit(content: string, maxChars: number): string {
   return (lastSpace > maxChars * 0.6 ? cut.slice(0, lastSpace) : cut) + ellipsis;
 }
 
+/**
+ * One call per kind, each with its own schema, because the shapes differ in
+ * ways that matter after generation: a meta tag is two strings with hard
+ * length limits, an email is a subject and a body. Asking for one free-text
+ * blob and parsing "title:" back out of it would be trusting the model with
+ * formatting the code can guarantee instead.
+ *
+ * Stored as one text column either way, laid out the way the reader will copy
+ * it — labelled lines for meta, subject then body for email.
+ */
+async function writeContent(
+  provider: LLMProvider,
+  kind: ArtifactKind,
+  system: string,
+  user: string,
+  primaryLanguage: string,
+): Promise<string> {
+  const request = { kind: "generate" as const, system, user };
+  const japanese = primaryLanguage.toLowerCase().startsWith("ja");
+
+  if (kind === "meta") {
+    const limits = metaLimits(primaryLanguage);
+    const { value } = await provider.completeStructured({
+      ...request,
+      schemaName: "meta_tags",
+      schema: MetaContentSchema,
+    });
+    return [
+      `title: ${truncateToLimit(value.title.trim(), limits.title)}`,
+      `description: ${truncateToLimit(value.description.trim(), limits.description)}`,
+    ].join("\n");
+  }
+
+  if (kind === "email") {
+    const { value } = await provider.completeStructured({
+      ...request,
+      schemaName: "email",
+      schema: EmailContentSchema,
+    });
+    return `${japanese ? "件名" : "Subject"}: ${value.subject.trim()}\n\n${value.body.trim()}`;
+  }
+
+  const { value } = await provider.completeStructured({
+    ...request,
+    schemaName: "artifact_content",
+    schema: ArtifactContentSchema,
+  });
+  return kind === "x_post"
+    ? truncateToLimit(value.content.trim(), X_POST_MAX_CHARS)
+    : value.content.trim();
+}
+
 export interface GenerateOptions {
   provider?: LLMProvider;
   database?: Database;
+  /** Which deliverable to write; defaults to the task channel's own (see CHANNEL_ARTIFACT_KINDS). */
+  kind?: ArtifactKind;
 }
 
 export async function generateArtifact(taskId: string, options: GenerateOptions = {}): Promise<Artifact> {
@@ -117,22 +232,15 @@ export async function generateArtifact(taskId: string, options: GenerateOptions 
 
   if (!context) throw new AppError("CONFLICT", `Product ${task.productId} has no Product Context yet`);
 
-  const kind = CHANNEL_ARTIFACT_KIND[task.channel];
+  const kind = artifactKindFor(task.channel, options.kind);
+  const primaryLanguage = context.primaryLanguage ?? "ja";
+  // Null only for rows extracted before primaryLanguage existed as a column;
+  // "ja" matches the audience this codebase has been built and verified
+  // against, and is a better default than silently writing English.
+  const system = renderContextSnapshot(product, context) + generateSystemSuffix(kind, primaryLanguage);
+  const user = buildTaskPrompt(task);
 
-  const { value } = await provider.completeStructured({
-    kind: "generate",
-    schemaName: "artifact_content",
-    schema: ArtifactContentSchema,
-    // Null only for rows extracted before primaryLanguage existed as a
-    // column; "ja" matches the audience this codebase has been built and
-    // verified against, and is a better default than silently writing English.
-    system: renderContextSnapshot(product, context) + generateSystemSuffix(kind, context.primaryLanguage ?? "ja"),
-    user: buildTaskPrompt(task),
-  });
-
-  const content =
-    kind === "x_post" ? truncateToLimit(value.content.trim(), X_POST_MAX_CHARS) : value.content.trim();
-
+  const content = await writeContent(provider, kind, system, user, primaryLanguage);
   const [row] = await conn.insert(schema.artifacts).values({ taskId, kind, content }).returning();
   return row;
 }

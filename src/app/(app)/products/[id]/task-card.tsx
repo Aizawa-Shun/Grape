@@ -6,11 +6,13 @@ import { useState, useTransition } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
-import { cx } from "@/components/ui/cx";
+import { cx, focusRing } from "@/components/ui/cx";
 import { Meter } from "@/components/ui/meter";
 import { Status } from "@/components/ui/status";
 import { TextLink } from "@/components/ui/text-link";
+import { ARTIFACT_KIND_LABELS, CHANNEL_ARTIFACT_KINDS } from "@/core/action/kinds";
 import { STAGE_UI } from "@/core/data/stages";
+import type { ArtifactKind } from "@/db/schema";
 import type { Task } from "@/core/intelligence/recommend";
 
 type Artifact = { id: string; kind: string; content: string; createdAt: Date };
@@ -77,6 +79,11 @@ export function TaskCard({ task, artifact, actionRun, costEstimateUsd, outcome, 
   const practiced = task.status === "approved";
   const failure = actionRun ? failureMessage(actionRun) : null;
   const willReallySend = !dryRun && task.channel !== "manual";
+  // Only a manual task has a choice; an X task can only ever be a post.
+  const kinds = CHANNEL_ARTIFACT_KINDS[task.channel] ?? [];
+  const [kind, setKind] = useState<ArtifactKind>(
+    artifact && kinds.includes(artifact.kind as ArtifactKind) ? (artifact.kind as ArtifactKind) : kinds[0],
+  );
 
   function run(kind: NonNullable<typeof busy>, url: string, body?: unknown) {
     setBusy(kind);
@@ -143,7 +150,12 @@ export function TaskCard({ task, artifact, actionRun, costEstimateUsd, outcome, 
       )}
 
       {artifact && !skipped && (
-        <div className="rounded-md bg-surface-sunken px-3 py-2.5 text-sm">
+        <div className="flex flex-col gap-1.5 rounded-md bg-surface-sunken px-3 py-2.5 text-sm">
+          {kinds.length > 1 && (
+            <span className="text-xs text-text-muted">
+              {ARTIFACT_KIND_LABELS[artifact.kind as ArtifactKind] ?? artifact.kind}
+            </span>
+          )}
           <p className="whitespace-pre-wrap">{artifact.content}</p>
         </div>
       )}
@@ -252,15 +264,33 @@ export function TaskCard({ task, artifact, actionRun, costEstimateUsd, outcome, 
 
       {!done && !skipped && !confirming && (
         <div className="flex flex-wrap gap-2">
+          {kinds.length > 1 && (
+            <select
+              aria-label="作る文面の種類"
+              value={kind}
+              disabled={pending}
+              onChange={(e) => setKind(e.target.value as ArtifactKind)}
+              className={cx(
+                "rounded-md border border-border-strong bg-surface px-2 py-1.5 text-xs text-text disabled:opacity-50",
+                focusRing,
+              )}
+            >
+              {kinds.map((option) => (
+                <option key={option} value={option}>
+                  {ARTIFACT_KIND_LABELS[option]}
+                </option>
+              ))}
+            </select>
+          )}
           <Button
             size="sm"
             loading={busy === "generate" && pending}
             disabled={pending}
-            onClick={() => run("generate", `/api/tasks/${task.id}/artifact`)}
+            onClick={() => run("generate", `/api/tasks/${task.id}/artifact`, { kind })}
           >
             {busy === "generate" && pending
               ? "文面を作っています…"
-              : artifact
+              : artifact && artifact.kind === kind
                 ? "作り直す"
                 : "文面を作る"}
           </Button>
