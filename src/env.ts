@@ -135,6 +135,14 @@ const EnvSchema = z.object({
   GRAPE_SESSION_SECRET: z.string().optional(),
 
   /**
+   * What a scheduler presents to POST /api/cron/tick, as a bearer token. Unset
+   * means the endpoint answers 503 and the loop only runs by hand (`pnpm
+   * loop:tick`) — there is no default, because a guessable value would let
+   * anyone on the internet trigger model calls billed to every account.
+   */
+  GRAPE_CRON_SECRET: z.string().trim().min(16).optional(),
+
+  /**
    * Both optional, and both required together: "Sign in with Google" is a
    * button that appears when there is somewhere for it to send someone, not a
    * thing every install must set up. From the OAuth client's own page in

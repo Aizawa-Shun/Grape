@@ -24,8 +24,10 @@ services:
     # a free instance spins down when idle and loses its container filesystem
     # on every restart, which used to take grape.db with it. Turso is outside
     # that filesystem, so restarts and spin-downs no longer lose data — the
-    # cost of free is only that a spun-down instance's scheduled loop and any
-    # request both wait for a cold start.
+    # cost of free is only that a request to a spun-down instance, including
+    # the scheduled loop's daily POST /api/cron/tick, waits for a cold start.
+    # The loop itself is not in this file: Render cron jobs are a paid service,
+    # so the free route is .github/workflows/loop.yml calling that endpoint.
     plan: free
 
     # --prod=false because `pnpm db:migrate` runs tsx, and tsx is a
@@ -84,6 +86,14 @@ services:
       # open the deployed URL registers the owner account, and everyone after
       # them needs an invitation from that account.
       - key: GRAPE_SESSION_SECRET
+        generateValue: true
+
+      # The bearer token POST /api/cron/tick requires (the weekly loop: measure
+      # outcomes that are due, re-diagnose stale products). Generated here so
+      # the endpoint is never open with a guessable value; copy it from the
+      # Render dashboard into the GitHub repository secret GRAPE_CRON_SECRET to
+      # turn .github/workflows/loop.yml on. Until then nothing calls it.
+      - key: GRAPE_CRON_SECRET
         generateValue: true
 
       # INGEST_BASE_URL is deliberately absent: Render publishes this service's

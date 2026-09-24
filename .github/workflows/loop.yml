@@ -1,0 +1,45 @@
+name: Weekly loop
+
+# Runs one turn of Grape's loop on a deployed instance: measure outcomes that
+# have had their seven days, and re-diagnose products whose last diagnosis is
+# more than a week old (see src/core/loop/tick.ts). Daily rather than weekly,
+# because "due" is decided per task and per product — a daily tick picks each
+# one up within a day of it becoming due, and does nothing on the other days.
+#
+# Inert until both repository secrets are set (Settings → Secrets and
+# variables → Actions):
+#   GRAPE_URL          the deployed origin, e.g. https://grape.onrender.com
+#   GRAPE_CRON_SECRET  the same value as the instance's GRAPE_CRON_SECRET
+#
+# Free on public and private repositories within Actions' included minutes; a
+# Render free instance that has spun down simply takes a cold start to answer.
+
+on:
+  schedule:
+    # 00:30 UTC = 09:30 JST, so a re-diagnosis is waiting at the start of the day.
+    - cron: "30 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GRAPE_URL: ${{ secrets.GRAPE_URL }}
+      GRAPE_CRON_SECRET: ${{ secrets.GRAPE_CRON_SECRET }}
+    steps:
+      - name: Skip when not configured
+        if: env.GRAPE_URL == '' || env.GRAPE_CRON_SECRET == ''
+        run: echo "GRAPE_URL / GRAPE_CRON_SECRET are not set; nothing to do."
+
+      - name: Run one tick
+        if: env.GRAPE_URL != '' && env.GRAPE_CRON_SECRET != ''
+        # --retry covers a spun-down free instance; --fail-with-body turns a
+        # 401/503 into a failed run instead of a green one that did nothing.
+        run: |
+          curl --silent --show-error --fail-with-body \
+            --retry 3 --retry-delay 20 --retry-all-errors \
+            --max-time 600 \
+            -X POST \
+            -H "Authorization: Bearer ${GRAPE_CRON_SECRET}" \
+            "${GRAPE_URL%/}/api/cron/tick"

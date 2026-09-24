@@ -18,7 +18,7 @@ import type { Channel, DiagnosisMode, FunnelStage, TaskStatus } from "@/db/schem
  * needs no traffic at all.
  */
 
-const DIAGNOSIS_STALE_DAYS = 7;
+export const DIAGNOSIS_STALE_DAYS = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface StepProduct {

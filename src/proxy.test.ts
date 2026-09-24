@@ -59,7 +59,7 @@ describe("proxy", () => {
     });
   });
 
-  it.each(["/api/collect", "/g.js", "/login", "/register", "/api/health"])(
+  it.each(["/api/collect", "/g.js", "/login", "/register", "/api/health", "/api/cron/tick"])(
     "lets %s through with no session at all",
     async (path) => {
       vi.stubEnv("GRAPE_SESSION_SECRET", "");

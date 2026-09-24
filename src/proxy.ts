@@ -32,10 +32,13 @@ import {
  * Reachable without a session: the snippet's ingest and script, the login and
  * registration flow itself, and the health check — which stays public so an
  * uptime monitor needs no credentials, and redacts its own payload for callers
- * that have none.
+ * that have none. /api/cron/ is authenticated too, just not by a session: a
+ * scheduler has no account to sign in as, so it presents GRAPE_CRON_SECRET
+ * instead and the route checks it (see api/cron/tick/route.ts).
  */
 const PUBLIC_PREFIXES = [
   "/api/collect",
+  "/api/cron/",
   "/api/auth/",
   "/api/health",
   "/login",
