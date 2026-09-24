@@ -1,14 +1,11 @@
-import Link from "next/link";
-
-import { Badge } from "@/components/ui/badge";
 import { Page, Section } from "@/components/ui/page";
-import { STAGE_UI } from "@/core/data/stages";
+import { TextLink } from "@/components/ui/text-link";
 import { buildBriefing } from "@/core/product/briefing";
 import { loadSnapshots } from "@/core/product/next-step";
-import { db } from "@/db/client";
 import { requireUser } from "@/server/auth/current-user";
 
 import { BriefingView } from "./briefing-view";
+import { ProductList, listItemsFrom } from "./product-list";
 import { RegisterProductForm } from "./register-product-form";
 
 // This list changes every time a product is registered or a diagnosis runs.
@@ -30,65 +27,16 @@ export default async function DashboardPage() {
   const snapshots = await loadSnapshots(user.id);
   const briefing = buildBriefing(snapshots);
 
-  const diagnoses = await Promise.all(
-    snapshots.map((snapshot) =>
-      db.query.diagnoses.findFirst({
-        where: (diagnoses, { eq }) => eq(diagnoses.productId, snapshot.product.id),
-        orderBy: (diagnoses, { desc }) => [desc(diagnoses.createdAt)],
-      }),
-    ),
-  );
-
   return (
     <Page>
       <BriefingView briefing={briefing} />
 
       {snapshots.length > 0 && (
-        <Section title="登録しているサービス">
-          <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-md border border-border shadow-card">
-            {snapshots.map((snapshot, i) => {
-              const diagnosis = diagnoses[i];
-              return (
-                <li key={snapshot.product.id}>
-                  <Link
-                    href={`/products/${snapshot.product.id}`}
-                    className="group flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm transition-colors hover:bg-surface-sunken"
-                  >
-                    <span className="flex min-w-0 flex-col gap-0.5">
-                      <span className="font-medium">{snapshot.product.name}</span>
-                      <span className="truncate text-text-muted">{snapshot.product.url}</span>
-                    </span>
-                    <span className="flex shrink-0 items-center gap-2">
-                      {/* Setup state first: a product still being read has
-                          nothing to diagnose yet, and one that failed to read
-                          needs attention before its diagnosis does. */}
-                      {snapshot.product.setupStatus === "pending" ? (
-                        <span className="text-xs text-text-muted">読み込み中…</span>
-                      ) : snapshot.product.setupStatus === "failed" ? (
-                        <Badge tone="attention">読み込めませんでした</Badge>
-                      ) : diagnosis ? (
-                        <Badge tone="attention">
-                          {STAGE_UI[diagnosis.bottleneckStage].label}で詰まっています
-                        </Badge>
-                      ) : (
-                        <span className="text-xs text-text-muted">まだ調べていません</span>
-                      )}
-                      {/*
-                        Appears only on hover, so a row that is a link looks
-                        like one without the list becoming a column of arrows.
-                      */}
-                      <span
-                        aria-hidden="true"
-                        className="text-text-subtle opacity-0 transition-opacity group-hover:opacity-100"
-                      >
-                        →
-                      </span>
-                    </span>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
+        <Section
+          title="登録しているサービス"
+          actions={<TextLink href="/products" className="text-xs">一覧を開く</TextLink>}
+        >
+          <ProductList products={listItemsFrom(snapshots)} />
         </Section>
       )}
 

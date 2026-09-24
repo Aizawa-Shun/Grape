@@ -64,7 +64,7 @@ function copyForStep(step: NextStep): StepCopy {
         detail:
           "サイトから自動で書いたものです。ここが違うと、このあとの診断も提案も同じだけずれます。",
         action: "内容を見る",
-        href: `/products/${step.product.id}`,
+        href: `/products/${step.product.id}/review`,
       };
     case "run_diagnosis":
       return {

@@ -32,8 +32,10 @@ vi.mock("@/core/context/crawl", () => ({
 }));
 
 const extractProductContext = vi.fn();
+const siteNameFrom = vi.fn((): string | null => null);
 vi.mock("@/core/context/extract", () => ({
   extractProductContext: (...args: unknown[]) => extractProductContext(...args),
+  siteNameFrom: () => siteNameFrom(),
 }));
 
 const analyzeSaas = vi.fn();
@@ -68,6 +70,8 @@ beforeEach(async () => {
   crawlSite.mockReset();
   extractProductContext.mockReset();
   analyzeSaas.mockReset();
+  siteNameFrom.mockReset();
+  siteNameFrom.mockReturnValue(null);
   llmAvailable.mockReturnValue(true);
 });
 
@@ -266,5 +270,50 @@ describe("runProductSetup", () => {
       where: eq(schema.productContexts.productId, first.productId),
     });
     expect(context?.what).toBe("分析されたwhat");
+  });
+});
+
+describe("runProductSetup naming", () => {
+  it("replaces the hostname placeholder with what the site calls itself", async () => {
+    crawlSite.mockResolvedValue([FAKE_PAGE]);
+    extractProductContext.mockResolvedValue(FAKE_EXTRACTION);
+    llmAvailable.mockReturnValue(false);
+    siteNameFrom.mockReturnValue("Cheeeess");
+
+    await register("https://example.com/");
+
+    expect((await db.query.products.findFirst())?.name).toBe("Cheeeess");
+  });
+
+  /** A re-read must not undo a name chosen on the review screen. */
+  it("leaves a name someone already chose alone", async () => {
+    crawlSite.mockResolvedValue([FAKE_PAGE]);
+    extractProductContext.mockResolvedValue(FAKE_EXTRACTION);
+    llmAvailable.mockReturnValue(false);
+    siteNameFrom.mockReturnValue("Cheeeess");
+
+    const { runProductSetup, startProductSetup } = await import("./register");
+    const started = await startProductSetup({ url: "https://example.com/", userId });
+    await db.update(schema.products).set({ name: "私のチェス" }).where(eq(schema.products.id, started.productId));
+    await runProductSetup(started);
+
+    expect((await db.query.products.findFirst())?.name).toBe("私のチェス");
+  });
+});
+
+describe("normalizeProductUrl", () => {
+  it("assumes https when the scheme is left off, as people type addresses", async () => {
+    const { normalizeProductUrl } = await import("./register");
+    // crawl's normalizeUrl is mocked to a pass-through in this file.
+    expect(normalizeProductUrl("cheeeess.com")).toBe("https://cheeeess.com");
+    expect(normalizeProductUrl("http://cheeeess.com/")).toBe("http://cheeeess.com/");
+    expect(normalizeProductUrl("   ")).toBeNull();
+  });
+
+  it("assumes plain http for a server on the reader's own machine", async () => {
+    const { normalizeProductUrl } = await import("./register");
+    expect(normalizeProductUrl("localhost:3000")).toBe("http://localhost:3000");
+    expect(normalizeProductUrl("127.0.0.1:8080/app")).toBe("http://127.0.0.1:8080/app");
+    expect(normalizeProductUrl("myapp.local")).toBe("http://myapp.local");
   });
 });

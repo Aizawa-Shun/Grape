@@ -1,12 +1,15 @@
 import { eq } from "drizzle-orm";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { buttonClassName } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import { Page, PageHeader, Section } from "@/components/ui/page";
 
 import { AnalysisReport } from "./analysis-report";
 import { ContextEditor } from "./context-editor";
 import { DeleteProductButton } from "./delete-product-button";
+import { RereadButton } from "./reread-button";
 import { SetupProgress } from "./setup-progress";
 
 import { findOwnedProduct } from "@/core/product/ownership";
@@ -39,6 +42,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
     orderBy: (contexts, { desc }) => [desc(contexts.version)],
   });
   const latest = versions[0] ?? null;
+  const analyzed = versions.find((version) => version.analysis) ?? null;
 
   const pages = await db.query.crawlPages.findMany({
     where: eq(schema.crawlPages.productId, id),
@@ -59,7 +63,14 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
             {product.url}
           </a>
         }
-        actions={<DeleteProductButton productId={id} name={product.name} />}
+        actions={
+          <>
+            <Link href={`/products/${id}/review`} className={buttonClassName("secondary", "sm")}>
+              名前・URL・説明を編集
+            </Link>
+            <DeleteProductButton productId={id} name={product.name} />
+          </>
+        }
       />
 
       {/*
@@ -95,13 +106,43 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
       )}
 
       {/*
-        The analysis is the page when there is one, and the four-field editor
-        is what remains when there is not — a context written before analyses
-        existed, corrected by hand, or read without a model configured. Both
-        render the same underlying row; only one of them is a report.
+        The analysis is the report whenever one exists — taken from the latest
+        version that has one, not only from the latest version. A human
+        correction is a new version with no analysis on it (context/edit.ts
+        writes the four fields only), and the review screen now asks everyone
+        to confirm those fields; tying the report to the latest version would
+        have made it vanish the moment anyone did what they were asked.
+        The four fields below are what diagnosis actually reasons from.
       */}
-      {latest?.analysis && !latest.editedByHuman ? (
-        <AnalysisReport analysis={latest.analysis} />
+      {analyzed?.analysis && latest ? (
+        <>
+          {latest.editedByHuman && (
+            <Callout>
+              下の分析は、AIがサイトを読んだ時点のものです。診断と提案には、あなたが確認した「診断に使う内容」が使われます。
+            </Callout>
+          )}
+          <AnalysisReport analysis={analyzed.analysis} />
+          <Section
+            title={latest.editedByHuman ? "診断に使う内容" : "内容を直す"}
+            description={
+              latest.editedByHuman
+                ? undefined
+                : "AIの読み取りが違っていたら、ここで直せます。直した内容が診断と提案に使われます。"
+            }
+            actions={
+              latest.editedByHuman ? (
+                <span className="text-xs text-text-muted">{versions.length}回目の内容（あなたが確認）</span>
+              ) : undefined
+            }
+          >
+            <ContextEditor
+              productId={id}
+              initial={{ what: latest.what, who: latest.who, why: latest.why, how: latest.how }}
+              editedByHuman={latest.editedByHuman}
+              quiet={!latest.editedByHuman}
+            />
+          </Section>
+        </>
       ) : latest ? (
         <Section
           title="このサービスについて"
@@ -119,26 +160,13 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
           />
         </Section>
       ) : product.setupStatus === "pending" ? null : (
+        // The dead end this used to be: a first read that failed left only a
+        // delete button. Reading again is the obvious thing to try first.
         <Section title="このサービスについて">
-          <p className="text-sm text-text-muted">まだ内容がありません。</p>
-        </Section>
-      )}
-
-      {/*
-        Present under the report too, so an analysis the reader disagrees with
-        is one click from being corrected rather than only re-runnable.
-      */}
-      {latest?.analysis && !latest.editedByHuman && (
-        <Section
-          title="内容を直す"
-          description="AIの読み取りが違っていたら、ここで直せます。直した内容が診断と提案に使われます。"
-        >
-          <ContextEditor
-            productId={id}
-            initial={{ what: latest.what, who: latest.who, why: latest.why, how: latest.how }}
-            editedByHuman={latest.editedByHuman}
-            quiet
-          />
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-text-muted">まだ内容がありません。</p>
+            <RereadButton productId={id} />
+          </div>
         </Section>
       )}
 

@@ -201,6 +201,22 @@ function primaryPage(pages: CrawledPage[]): CrawledPage {
   return pages[0];
 }
 
+/**
+ * What the site calls itself: og:site_name, the JSON-LD name, the manifest's
+ * name, and only then the <title> — cut at the first " | " / " - " / " — ",
+ * since titles are usually "Product — tagline" and the tagline is not a name.
+ * Null when the first readable page offers none of them.
+ */
+export function siteNameFrom(pages: CrawledPage[]): string | null {
+  const page = pages.find(hasEvidence);
+  if (!page) return null;
+
+  const stated = metaValue(page, "og:site_name", "ld:name", "manifest:name", "manifest:short_name");
+  const fromTitle = page.title?.split(/\s+[|\-–—:]\s+/)[0]?.trim();
+  const name = stated ?? fromTitle;
+  return name ? name.slice(0, 60) : null;
+}
+
 function metaValue(page: CrawledPage, ...keys: string[]): string | undefined {
   for (const key of keys) {
     const value = page.meta[key]?.trim();

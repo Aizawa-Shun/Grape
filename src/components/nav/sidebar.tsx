@@ -58,7 +58,9 @@ const MANAGE: Item[] = [
   {
     label: "サービス",
     icon: "product",
-    href: (id) => (id ? `/products/${id}` : "/"),
+    // No service selected yet means the list, not the home page: the list is
+    // where registering one starts.
+    href: (id) => (id ? `/products/${id}` : "/products"),
     match: (pathname, id) => Boolean(id) && pathname === `/products/${id}`,
     hint: "説明文と、読み取ったページ",
   },

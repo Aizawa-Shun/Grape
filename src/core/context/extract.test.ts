@@ -6,6 +6,7 @@ import {
   buildExtractionInput,
   buildRuleBasedContext,
   hasEvidence,
+  siteNameFrom,
 } from "./extract";
 
 function page(overrides: Partial<CrawledPage> = {}): CrawledPage {
@@ -262,5 +263,28 @@ describe("buildRuleBasedContext", () => {
     expect(result.what).toBe("サイト上に明示なし");
     expect(result.evidenceUrls).toEqual([]);
     expect(result.confidence).toBe(0);
+  });
+});
+
+describe("siteNameFrom", () => {
+  const readable = { text: "オンラインでチェスを遊べるサービスです。".repeat(5) };
+
+  it("prefers the name the site declares for itself over its title", () => {
+    expect(
+      siteNameFrom([page({ ...readable, title: "Play chess online | Free", meta: { "og:site_name": "Cheeeess" } })]),
+    ).toBe("Cheeeess");
+  });
+
+  it("falls back to the title, cut before the tagline", () => {
+    expect(siteNameFrom([page({ ...readable, title: "Cheeeess — Play chess online" })])).toBe("Cheeeess");
+    expect(siteNameFrom([page({ ...readable, title: "Cheeeess | 無料" })])).toBe("Cheeeess");
+  });
+
+  it("keeps a hyphenated name whole, since only a spaced separator marks a tagline", () => {
+    expect(siteNameFrom([page({ ...readable, title: "Chess-Pro" })])).toBe("Chess-Pro");
+  });
+
+  it("has no answer when nothing could be read", () => {
+    expect(siteNameFrom([page({ status: 404 })])).toBeNull();
   });
 });

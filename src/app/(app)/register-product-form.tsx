@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useId, useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
 import { controlClass } from "@/components/ui/field";
@@ -10,12 +10,17 @@ import { Status } from "@/components/ui/status";
 /**
  * Submitting only creates the row; reading the site happens afterwards, on the
  * server, whether or not this page is still open (see api/products/route.ts).
- * So this form no longer waits for any of that — it hands over to the product
- * page as soon as there is a product page to hand over to, and the progress
- * that used to live here lives there instead, where it survives a reload.
+ * So this form does not wait for any of that — it hands over to the review
+ * screen as soon as there is one, which shows the progress (surviving a
+ * reload) and then the AI's draft for the reader to confirm or correct.
+ *
+ * A text field rather than type="url": the browser's own check rejects
+ * "example.com", which is how most people type an address. The server fills
+ * in https:// (see normalizeProductUrl).
  */
 export function RegisterProductForm() {
   const router = useRouter();
+  const hintId = useId();
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -36,7 +41,7 @@ export function RegisterProductForm() {
         setError(body.error ?? "登録できませんでした。もう一度お試しください。");
         return;
       }
-      router.push(`/products/${body.productId}`);
+      router.push(`/products/${body.productId}/review`);
       router.refresh();
     });
   }
@@ -45,9 +50,12 @@ export function RegisterProductForm() {
     <form onSubmit={handleSubmit} className="flex flex-col gap-3">
       <div className="flex flex-col gap-2 sm:flex-row">
         <input
-          type="url"
+          type="text"
+          inputMode="url"
+          autoComplete="url"
           required
           aria-label="サービスのURL"
+          aria-describedby={hintId}
           placeholder="https://your-product.com"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
@@ -58,6 +66,10 @@ export function RegisterProductForm() {
           {pending ? "追加しています…" : "追加する"}
         </Button>
       </div>
+
+      <p id={hintId} className="text-xs text-text-muted">
+        https:// が無い場合は自動で補います。
+      </p>
 
       {error && <Status tone="error">{error}</Status>}
     </form>

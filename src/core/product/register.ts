@@ -5,7 +5,11 @@ import { analyzeSaas } from "@/core/context/analyze";
 import { crawlSite } from "@/core/context/crawl";
 import { contextFromAnalysis } from "@/core/context/derive";
 import { AppError, toAppError } from "@/core/errors";
-import { extractProductContext, type ProductContextExtraction } from "@/core/context/extract";
+import {
+  extractProductContext,
+  siteNameFrom,
+  type ProductContextExtraction,
+} from "@/core/context/extract";
 import { getProvider, llmAvailable } from "@/core/llm";
 import { db, schema } from "@/db/client";
 import { normalizeUrl } from "@/core/context/crawl";
@@ -30,6 +34,29 @@ import { describeForUser } from "@/server/http/errors";
  * (see PRODUCT_SETUP_STATUSES) so any later page load can say so.
  */
 
+/**
+ * A product address as someone types it: `example.com` is taken to mean
+ * `https://example.com/`, and `localhost:3000` to mean `http://…` — a dev
+ * server on the reader's own machine is almost never serving TLS, and
+ * defaulting it to https read nothing at all. Separate from crawl.ts's
+ * normalizeUrl on purpose: that one also resolves links found *on* a page,
+ * where a bare `about` is a relative path, and prefixing a scheme there would
+ * turn it into a host.
+ */
+export function normalizeProductUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return normalizeUrl(trimmed);
+
+  const host = trimmed.split(/[/:?#]/)[0].toLowerCase();
+  const local =
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    /^127\.|^0\.0\.0\.0$|^10\.|^192\.168\./.test(host);
+  return normalizeUrl(`${local ? "http" : "https"}://${trimmed}`);
+}
+
 export interface StartedProduct {
   productId: string;
   url: string;
@@ -45,7 +72,7 @@ export async function startProductSetup(input: {
   /** Who ends up owning the row. Required: a product with no owner is one nobody can be shown. */
   userId: string;
 }): Promise<StartedProduct> {
-  const url = normalizeUrl(input.url);
+  const url = normalizeProductUrl(input.url);
   if (!url) throw new AppError("INVALID_INPUT", `Not a valid URL: ${input.url}`);
 
   const name = input.name?.trim() || new URL(url).hostname;
@@ -111,9 +138,21 @@ export async function runProductSetup({ productId, url }: StartedProduct): Promi
       editedByHuman: false,
     });
 
+    // Registration names a product after its hostname because that is all
+    // there is to go on before the crawl. Once the site has said what it calls
+    // itself, use that — but only while the name is still that placeholder, so
+    // a name someone chose on the review screen is never overwritten by a
+    // re-read.
+    const product = await db.query.products.findFirst({
+      where: eq(schema.products.id, productId),
+      columns: { name: true },
+    });
+    const siteName = siteNameFrom(pages);
+    const rename = siteName && product?.name === new URL(url).hostname ? { name: siteName } : {};
+
     await db
       .update(schema.products)
-      .set({ setupStatus: "ready", setupError: null })
+      .set({ setupStatus: "ready", setupError: null, ...rename })
       .where(eq(schema.products.id, productId));
   } catch (error) {
     const shown = toAppError(error);
