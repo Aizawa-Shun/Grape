@@ -9,8 +9,10 @@
 # that /api/health verifies.
 #
 # Left for Render to fill in (see `sync: false` below): DATABASE_AUTH_TOKEN is
-# required; LLM_PROVIDER and ANTHROPIC_API_KEY are optional — AI is opt-in, so
-# a deploy with neither set still works.
+# required; LLM_PROVIDER is optional — AI is opt-in, so a deploy with it unset
+# still works. There is no API key to set here at all: each account brings its
+# own from /account once signed in (see core/auth/users.ts), so an Anthropic or
+# OpenAI key belongs to a person, never to this blueprint.
 
 services:
   - type: web
@@ -57,20 +59,20 @@ services:
 
       # From `turso db tokens create <name>`. A local file: URL has nothing to
       # authenticate to and ignores this; it exists for exactly this remote
-      # case. Kept out of the file, like the Anthropic key, because both
-      # belong to your account rather than to this checkout.
+      # case. Kept out of the file because it belongs to your Turso account
+      # rather than to this checkout.
       - key: DATABASE_AUTH_TOKEN
         sync: false
 
-      # Both optional and left blank by default — AI is opt-in (see env.ts).
-      # A deploy with neither set still works: product understanding falls
-      # back to the rule-based reading of the page, and the AI-only features
-      # (diagnosis, task recommendation, artifact generation) simply refuse
-      # until both of these are filled in on Render. See the README's
-      # "AIを使えるようにする" for setting these after the first deploy.
+      # Which service to talk to — left blank by default, since AI is
+      # opt-in (see env.ts). A deploy with this unset still works: product
+      # understanding falls back to the rule-based reading of the page, and
+      # the AI-only features (diagnosis, task recommendation, artifact
+      # generation) simply refuse until it is set here *and* each account has
+      # added its own key from /account. See the README's "AIを使えるように
+      # する". No API key env var belongs in this blueprint any more — it is
+      # per-account, not per-instance.
       - key: LLM_PROVIDER
-        sync: false
-      - key: ANTHROPIC_API_KEY
         sync: false
 
       # Generated once by Render and kept, so a deploy does not sign everyone
