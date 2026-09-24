@@ -27,6 +27,8 @@ interface Props {
   productId: string;
   diagnosis: Diagnosis | null;
   tasks: TaskWithExtras[];
+  /** Unfinished work from earlier diagnoses — see tasks/page.tsx for why it is shown at all. */
+  carriedOver?: TaskWithExtras[];
   dryRun: boolean;
 }
 
@@ -35,7 +37,7 @@ interface Props {
  * rather than as a labelled field, because "ボトルネック: Engage" requires
  * knowing two things the reader has not been told.
  */
-export function DiagnosisPanel({ productId, diagnosis, tasks, dryRun }: Props) {
+export function DiagnosisPanel({ productId, diagnosis, tasks, carriedOver = [], dryRun }: Props) {
   if (!diagnosis) {
     return (
       <div className="flex flex-col gap-3">
@@ -97,6 +99,32 @@ export function DiagnosisPanel({ productId, diagnosis, tasks, dryRun }: Props) {
           </ul>
         )}
       </div>
+
+      {carriedOver.length > 0 && (
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-0.5">
+            <h3 className="text-sm font-medium text-text-muted">
+              前回までの診断から残っているもの（{carriedOver.length}件）
+            </h3>
+            <p className="text-xs text-text-muted">
+              まだ終わっていないものと、効果をまだ測っていないものです。不要なら「やらない」で閉じられます。
+            </p>
+          </div>
+          <ul className="flex flex-col gap-3">
+            {carriedOver.map((task) => (
+              <TaskCard
+                key={task.id}
+                task={task}
+                artifact={task.artifact}
+                actionRun={task.actionRun}
+                costEstimateUsd={task.costEstimateUsd}
+                outcome={task.outcome}
+                dryRun={dryRun}
+              />
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

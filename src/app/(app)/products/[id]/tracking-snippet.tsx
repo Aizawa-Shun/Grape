@@ -49,9 +49,8 @@ export function TrackingSnippet({ productId, ingestBaseUrl }: Props) {
             pnpm tunnel
           </code>
           <p className="mt-2">
-            表示された https://…trycloudflare.com を <code className="font-mono">.env</code> の{" "}
-            <code className="font-mono">INGEST_BASE_URL</code> に書いて、
-            サーバーを再起動してからこのページを開き直してください。
+            表示された https://…trycloudflare.com を、下の「計測」にある「訪問データの受け取り先」に貼って保存してください。
+            再起動は要りません。
           </p>
         </Callout>
       )}
@@ -68,6 +67,17 @@ export function TrackingSnippet({ productId, ingestBaseUrl }: Props) {
           あなたのサイトの全ページに貼ります（&lt;head&gt; の中か &lt;/body&gt; の直前）
         </span>
       </div>
+
+      {/*
+        The one call a site has to make by hand. It used to be mentioned only
+        in the key-event field's hint, so someone who pasted the snippet and
+        stopped had a funnel whose 使ってもらう stage could never move.
+      */}
+      <p className="text-xs text-text-muted">
+        ページを見たことは自動で届きます。「ゴールの操作」（登録完了など）だけは、それが起きたところで{" "}
+        <code className="font-mono">grape(&apos;track&apos;, &apos;signup&apos;)</code>{" "}
+        のように呼んでください。名前は「ゴールの操作」と揃えます。
+      </p>
     </div>
   );
 }

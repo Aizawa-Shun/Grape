@@ -107,7 +107,11 @@ export function pickNextStep(snapshots: ProductSnapshot[], now: Date = new Date(
 function stepFor(snapshot: ProductSnapshot, now: Date): NextStep {
   const { product, tasks } = snapshot;
 
-  const open = tasks.filter((task) => task.status !== "done" && task.status !== "skipped");
+  // `approved` is left out on purpose: that is a practice-mode approval, and
+  // the only way forward from it is turning practice mode off — something this
+  // headline should not nag about on every visit. It stays open everywhere
+  // else (the task list, the sidebar count), because it has not been sent.
+  const open = tasks.filter((task) => task.status === "proposed");
 
   const awaitingApproval = open.find((task) => task.hasArtifact);
   if (awaitingApproval) {

@@ -2,7 +2,7 @@ import "dotenv/config";
 
 import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
-import { lt } from "drizzle-orm";
+import { eq, lt } from "drizzle-orm";
 
 import { databaseCredentials } from "./connection";
 import { applyPragmas } from "./pragmas";
@@ -21,13 +21,13 @@ import * as schema from "./schema";
  */
 async function main(): Promise<void> {
   const { url } = databaseCredentials();
-  const days = Number(process.env.GRAPE_EVENT_RETENTION_DAYS ?? 180);
-  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
   const client = createClient(databaseCredentials());
   try {
     await applyPragmas(client);
     const db = drizzle(client, { schema });
+    const days = await retentionDays(db);
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const result = await db.delete(schema.events).where(lt(schema.events.ts, cutoff));
     console.log(
       `Deleted ${result.rowsAffected} event(s) older than ${cutoff.toISOString()} from ${url}`,
@@ -35,6 +35,27 @@ async function main(): Promise<void> {
   } finally {
     client.close();
   }
+}
+
+/**
+ * The same answer /api/collect's opportunistic prune gets from
+ * currentSettings(): a value saved from /settings wins over .env, which wins
+ * over the default. Read by hand rather than through core/settings, like the
+ * rest of this script, which runs outside the app and its env schema — but it
+ * must not read .env alone, or `pnpm db:prune` would quietly delete to a
+ * window the owner already changed on the settings screen.
+ */
+async function retentionDays(db: ReturnType<typeof drizzle<typeof schema>>): Promise<number> {
+  const [override] = await db
+    .select({ value: schema.settings.value })
+    .from(schema.settings)
+    .where(eq(schema.settings.key, "GRAPE_EVENT_RETENTION_DAYS"));
+
+  for (const candidate of [override?.value, process.env.GRAPE_EVENT_RETENTION_DAYS]) {
+    const days = Number(candidate);
+    if (Number.isInteger(days) && days > 0) return days;
+  }
+  return 180;
 }
 
 main().catch((error: unknown) => {

@@ -37,7 +37,13 @@ const PER_CLIENT: { capacity: number; refillPerSec: number } = { capacity: 120, 
 /** The backstop that address rotation cannot get around — bounds disk growth. */
 const PER_PRODUCT: { capacity: number; refillPerSec: number } = { capacity: 2_000, refillPerSec: 0.5 };
 
-const UTM_KEYS = ["source", "medium", "campaign", "term", "content"] as const;
+/**
+ * The exact names g.js sends and funnel.ts reads (`utm_source` …). These were
+ * once the bare `source`/`medium`, which matched neither end: zod drops keys a
+ * closed object does not list, so every tagged visit was stored as `{}` and
+ * Reach-by-source never saw a campaign. Keep all three places on one spelling.
+ */
+const UTM_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"] as const;
 
 const CollectInputSchema = z.object({
   // Ids are crypto.randomUUID(), so this is exact and turns most junk traffic

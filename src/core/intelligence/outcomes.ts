@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 
 import { getFunnelForRange } from "@/core/data/funnel";
 import { AppError } from "@/core/errors";
@@ -107,18 +107,33 @@ export async function getRecentOutcomes(
 ): Promise<PastOutcome[]> {
   const conn = database ?? db;
 
+  // Done only. A practice-mode approval is `approved`, never `done` (see
+  // action/execute.ts), and nothing it "caused" belongs in the evidence a
+  // diagnosis reasons from.
   const doneTasks = await conn.query.tasks.findMany({
-    where: eq(schema.tasks.productId, productId),
+    where: and(eq(schema.tasks.productId, productId), eq(schema.tasks.status, "done")),
     orderBy: (tasks, { desc }) => [desc(tasks.completedAt)],
   });
+  if (doneTasks.length === 0) return [];
+
+  // One query for every outcome rather than one per task: newest first, so
+  // the first row seen for a task is its latest measurement.
+  const outcomes = await conn.query.outcomes.findMany({
+    where: inArray(
+      schema.outcomes.taskId,
+      doneTasks.map((task) => task.id),
+    ),
+    orderBy: [desc(schema.outcomes.evaluatedAt)],
+  });
+  const latestByTask = new Map<string, Outcome>();
+  for (const outcome of outcomes) {
+    if (!latestByTask.has(outcome.taskId)) latestByTask.set(outcome.taskId, outcome);
+  }
 
   const results: PastOutcome[] = [];
   for (const task of doneTasks) {
     if (results.length >= limit) break;
-    const outcome = await conn.query.outcomes.findFirst({
-      where: eq(schema.outcomes.taskId, task.id),
-      orderBy: [desc(schema.outcomes.evaluatedAt)],
-    });
+    const outcome = latestByTask.get(task.id);
     if (!outcome) continue;
     results.push({
       taskTitle: task.title,

@@ -9,6 +9,7 @@ import { Callout } from "@/components/ui/callout";
 import { cx } from "@/components/ui/cx";
 import { Meter } from "@/components/ui/meter";
 import { Status } from "@/components/ui/status";
+import { TextLink } from "@/components/ui/text-link";
 import { STAGE_UI } from "@/core/data/stages";
 import type { Task } from "@/core/intelligence/recommend";
 
@@ -70,6 +71,10 @@ export function TaskCard({ task, artifact, actionRun, costEstimateUsd, outcome, 
   const channel = CHANNEL_COPY[task.channel] ?? { where: task.channel, note: "" };
   const done = task.status === "done";
   const skipped = task.status === "skipped";
+  // Approved in practice mode: signed off, never sent. Still live — the
+  // buttons below stay — because turning practice mode off is all it takes to
+  // send the same text for real.
+  const practiced = task.status === "approved";
   const failure = actionRun ? failureMessage(actionRun) : null;
   const willReallySend = !dryRun && task.channel !== "manual";
 
@@ -143,10 +148,25 @@ export function TaskCard({ task, artifact, actionRun, costEstimateUsd, outcome, 
         </div>
       )}
 
-      {done && actionRun?.status === "dry_run" && (
+      {practiced && (
         <Status>
-          練習モードで実行しました。実際には送っていません。本当に送るには、設定ファイルで練習モードを解除してください。
+          練習モードで承認しました。まだ実際には送っていないので、効果を測る対象にもなりません。
+          {dryRun ? (
+            <>
+              {" "}
+              本当に送るには、
+              <TextLink href="/settings">設定</TextLink>
+              で練習モードをオフにしてから、もう一度実行してください。
+            </>
+          ) : (
+            " 練習モードはいまオフです。もう一度実行すると、本当に送られます。"
+          )}
         </Status>
+      )}
+      {/* Rows approved in practice mode before `approved` existed were marked
+          done; they still say what actually happened. */}
+      {done && actionRun?.status === "dry_run" && (
+        <Status>練習モードで実行しました。実際には送っていません。</Status>
       )}
       {done && actionRun?.status === "sent" && (
         <Status>
@@ -252,7 +272,7 @@ export function TaskCard({ task, artifact, actionRun, costEstimateUsd, outcome, 
               disabled={pending}
               onClick={() => setConfirming(true)}
             >
-              {failure ? "もう一度実行する" : "内容を確認して実行"}
+              {failure || practiced ? "もう一度実行する" : "内容を確認して実行"}
             </Button>
           )}
 

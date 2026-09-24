@@ -195,3 +195,46 @@ describe("TaskCard approval gate", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("読み取れませんでした");
   });
 });
+
+describe("TaskCard after a practice-mode approval", () => {
+  const practiceRun = {
+    id: "r1",
+    status: "dry_run" as const,
+    externalUrl: null,
+    costEstimateUsd: 0.015,
+    response: null,
+  };
+
+  it("says nothing was sent and points at where practice mode is turned off", () => {
+    render(
+      <TaskCard
+        task={task({ status: "approved" })}
+        artifact={artifact}
+        actionRun={practiceRun}
+        costEstimateUsd={0.015}
+        outcome={null}
+        dryRun
+      />,
+    );
+
+    expect(screen.getByText(/まだ実際には送っていない/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "設定" })).toHaveAttribute("href", "/settings");
+    // Not measurable: it never happened.
+    expect(screen.queryByRole("button", { name: "効果を測る" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the task live so it can be sent for real once practice mode is off", () => {
+    render(
+      <TaskCard
+        task={task({ status: "approved" })}
+        artifact={artifact}
+        actionRun={practiceRun}
+        costEstimateUsd={0.015}
+        outcome={null}
+        dryRun={false}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "もう一度実行する" })).toBeInTheDocument();
+  });
+});

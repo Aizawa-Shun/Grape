@@ -24,7 +24,9 @@ import { getChannel } from "./channels";
  *      editing .env directly, never as a side effect of anything in this file.
  *      Read through `currentSettings()`, not the raw `env` import, so a
  *      change made from /settings takes effect on the very next approval
- *      without a restart.
+ *      without a restart. A practice run leaves the task `approved` — seen,
+ *      signed off, not sent — rather than `done`, so it neither starts the
+ *      outcome clock nor blocks a real send later.
  * The `manual` channel has no network call to gate — see channels/manual.ts —
  * so dry-run does not apply to it; approving a manual task always finishes it.
  */
@@ -82,7 +84,13 @@ export async function approveAndExecute(
     // send would have posted, with nowhere else it is shown before this point.
     // Never truncate `content` — showing it in full is the entire purpose.
     log.info("action.dry_run", { channel: task.channel, taskId, content: artifact.content });
-    return finish(conn, run.id, taskId, { status: "dry_run" });
+    // `approved`, not `done`: nothing left the building. Marking it done used
+    // to make a post that was never published measurable seven days later,
+    // and its "outcome" — whatever the funnel happened to do that week — then
+    // reached the next diagnosis as evidence the post had worked (or had not).
+    // Approved-but-unsent keeps the task live, so once practice mode is off the
+    // same card can send it for real.
+    return finish(conn, run.id, taskId, { status: "dry_run" }, "approved");
   }
 
   try {
@@ -92,11 +100,13 @@ export async function approveAndExecute(
     // real network call is genuinely about to happen.
     const channel = getChannel(task.channel);
     const result = await channel.execute(artifact.content);
-    return finish(conn, run.id, taskId, {
-      status: "sent",
-      externalUrl: result.externalUrl,
-      response: result.response,
-    });
+    return finish(
+      conn,
+      run.id,
+      taskId,
+      { status: "sent", externalUrl: result.externalUrl, response: result.response },
+      "done",
+    );
   } catch (error) {
     // Deliberately does not touch task.status: a failed send is retryable —
     // generate a fresh approval, or the same artifact again — not a dead end.
@@ -113,6 +123,8 @@ async function finish(
   runId: string,
   taskId: string,
   fields: { status: "dry_run" | "sent"; externalUrl?: string | null; response?: unknown },
+  /** `done` starts the 7-day outcome clock; `approved` (a practice run) must not. */
+  taskStatus: "done" | "approved",
 ): Promise<ActionRun> {
   const executedAt = new Date();
   const [updated] = await conn
@@ -120,7 +132,14 @@ async function finish(
     .set({ ...fields, executedAt })
     .where(eq(schema.actionRuns.id, runId))
     .returning();
-  await conn.update(schema.tasks).set({ status: "done", completedAt: executedAt }).where(eq(schema.tasks.id, taskId));
+  await conn
+    .update(schema.tasks)
+    .set(
+      taskStatus === "done"
+        ? { status: "done", completedAt: executedAt }
+        : { status: "approved", completedAt: null },
+    )
+    .where(eq(schema.tasks.id, taskId));
   return updated;
 }
 

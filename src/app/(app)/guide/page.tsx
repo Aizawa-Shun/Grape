@@ -6,7 +6,9 @@ import { STAGE_UI } from "@/core/data/stages";
 import type { FunnelStage } from "@/db/schema";
 
 /**
- * Real content, not a placeholder like its neighbours in the account menu.
+ * Real content. It was written when its neighbours in the account menu were
+ * placeholders; they are all real pages now, and this one stays held to the
+ * same rule it set for itself.
  *
  * The audience can build a product but has never done marketing, so the words
  * this app uses — the five stages, the goal action, the practice mode — are
@@ -90,7 +92,20 @@ export default function GuidePage() {
             <dt className="font-medium">「ゴールの操作」って何を決めればいい？</dt>
             <dd className="text-text-muted">
               「ここまで来たら使ってもらえた」と言い切れる操作を1つだけ選びます。登録完了、最初の保存、購入。
-              決めるまで、後半の2つの段階は数えようがありません。
+              決めるまで「{STAGE_UI.activate.label}」の段階は数えようがありません。「{STAGE_UI.retain.label}」は数えますが、
+              比べる相手が1つ手前の「{STAGE_UI.engage.label}」になります。
+            </dd>
+          </div>
+          <div className="flex flex-col gap-1">
+            <dt className="font-medium">ゴールの操作は、どうやってGrapeに伝える？</dt>
+            <dd className="text-text-muted">
+              その操作が起きたところで、貼ったコードと同じページから次の1行を呼びます。名前は設定画面の「ゴールの操作」と揃えます。
+              <code className="mt-1 block w-fit rounded bg-surface-sunken px-1.5 py-0.5 font-mono text-text">
+                grape(&apos;track&apos;, &apos;signup&apos;)
+              </code>
+              <span className="mt-1 block">
+                コードの読み込みより先に呼んでも失われません。読み込み後にまとめて送られます。
+              </span>
             </dd>
           </div>
           <div className="flex flex-col gap-1">
@@ -104,7 +119,8 @@ export default function GuidePage() {
             <dt className="font-medium">勝手に投稿されたりしない？</dt>
             <dd className="text-text-muted">
               しません。文面を作る操作と、実行する操作は別で、実行前に内容と費用が出ます。
-              さらに既定では「練習モード」で、本当に送るには設定ファイルを書き換える必要があります。
+              さらに既定では「練習モード」で、本当に送るには設定画面で練習モードをオフにする必要があります（オフにする前に確認が出ます）。
+              練習モードで承認したものは「まだ送っていない」扱いのまま残り、効果を測る対象にもなりません。
             </dd>
           </div>
           <div className="flex flex-col gap-1">

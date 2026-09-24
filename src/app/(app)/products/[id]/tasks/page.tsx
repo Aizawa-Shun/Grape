@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { estimateActionCostUsd } from "@/core/action/channel";
 import { Page, PageHeader } from "@/components/ui/page";
+import { findCarriedOverTasks } from "@/core/intelligence/carried-over";
 import { findOwnedProduct } from "@/core/product/ownership";
 import { loadSettings } from "@/core/settings";
 import { db, schema } from "@/db/client";
@@ -47,29 +48,31 @@ export default async function TasksPage({ params }: { params: Promise<{ id: stri
   // Each task's latest artifact (if generated) and latest action run (if
   // approved) — fetched per task since a task list this small does not
   // warrant a join, and keeping it as separate queries keeps each one legible.
-  const tasks = await Promise.all(
-    tasksRaw.map(async (task) => {
-      const artifact =
-        (await db.query.artifacts.findFirst({
-          where: eq(schema.artifacts.taskId, task.id),
-          orderBy: (artifacts, { desc }) => [desc(artifacts.createdAt)],
-        })) ?? null;
-      const actionRun =
-        (await db.query.actionRuns.findFirst({
-          where: eq(schema.actionRuns.taskId, task.id),
-          orderBy: (actionRuns, { desc }) => [desc(actionRuns.createdAt)],
-        })) ?? null;
-      const costEstimateUsd = artifact
-        ? estimateActionCostUsd(task.channel, artifact.content)
-        : null;
-      const outcome =
-        (await db.query.outcomes.findFirst({
-          where: eq(schema.outcomes.taskId, task.id),
-          orderBy: (outcomes, { desc }) => [desc(outcomes.evaluatedAt)],
-        })) ?? null;
-      return { ...task, artifact, actionRun, costEstimateUsd, outcome };
-    }),
-  );
+  const withExtras = async (task: (typeof tasksRaw)[number]) => {
+    const artifact =
+      (await db.query.artifacts.findFirst({
+        where: eq(schema.artifacts.taskId, task.id),
+        orderBy: (artifacts, { desc }) => [desc(artifacts.createdAt)],
+      })) ?? null;
+    const actionRun =
+      (await db.query.actionRuns.findFirst({
+        where: eq(schema.actionRuns.taskId, task.id),
+        orderBy: (actionRuns, { desc }) => [desc(actionRuns.createdAt)],
+      })) ?? null;
+    const costEstimateUsd = artifact ? estimateActionCostUsd(task.channel, artifact.content) : null;
+    const outcome =
+      (await db.query.outcomes.findFirst({
+        where: eq(schema.outcomes.taskId, task.id),
+        orderBy: (outcomes, { desc }) => [desc(outcomes.evaluatedAt)],
+      })) ?? null;
+    return { ...task, artifact, actionRun, costEstimateUsd, outcome };
+  };
+
+  const tasks = await Promise.all(tasksRaw.map(withExtras));
+
+  // Unfinished work from earlier rounds — see findCarriedOverTasks for why.
+  const earlierRaw = await findCarriedOverTasks(id, latestDiagnosis?.id ?? null);
+  const carriedOver = await Promise.all(earlierRaw.map(withExtras));
 
   return (
     <Page>
@@ -82,6 +85,7 @@ export default async function TasksPage({ params }: { params: Promise<{ id: stri
         productId={id}
         diagnosis={latestDiagnosis}
         tasks={tasks}
+        carriedOver={carriedOver}
         dryRun={settings.GRAPE_ACTION_DRY_RUN}
       />
     </Page>
