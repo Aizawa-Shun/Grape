@@ -105,6 +105,22 @@ const AxisScore = z.object({
     ),
 });
 
+/**
+ * A place on a 1–5 axis, clamped rather than rejected — same rescue as the
+ * scores. Not rounded: two services a model puts at 3.5 and 4 are a real
+ * difference on a map, and rounding would stack them on one dot.
+ */
+const coordinate = z.preprocess(
+  (value) => (typeof value === "number" ? Math.min(5, Math.max(1, value)) : value),
+  z.number().min(1).max(5),
+);
+
+const PositioningAxis = z.object({
+  label: z.string().describe("軸の名前。12字以内。例: 対象の習熟度"),
+  low: z.string().describe("軸の小さい側（1）の端の言葉。10字以内。例: 初心者向け"),
+  high: z.string().describe("軸の大きい側（5）の端の言葉。10字以内。例: 上級者向け"),
+});
+
 export type TextClaim = z.infer<typeof TextClaim>;
 export type ListClaim = z.infer<typeof ListClaim>;
 
@@ -203,10 +219,53 @@ export const SaasAnalysisSchema = z.object({
       "類似サービス・競合候補を2〜4件。断定は避け、「〜に近い」「〜の代替になりうる」と書く。" +
         "実在するサービス名を挙げ、思い当たらない場合は代替手段（手作業・既存ツールなど）を挙げる。",
     ),
+    /**
+     * A two-axis map of this service among the similar ones — the one market
+     * picture a reader takes in at a glance. The axes are the model's choice,
+     * because what separates services differs by market (price vs. depth for
+     * one, audience vs. format for another); it is told to pick the two on
+     * which the services actually spread out.
+     */
+    positioning: z
+      .object({
+        xAxis: PositioningAxis.describe("横軸"),
+        yAxis: PositioningAxis.describe("縦軸"),
+        self: z
+          .object({ x: coordinate.describe("1〜5"), y: coordinate.describe("1〜5") })
+          .describe("このサービスの位置"),
+        others: z
+          .array(
+            z.object({
+              name: z.string().describe("similarServices に挙げたサービス名・代替手段。短く。"),
+              x: coordinate.describe("1〜5"),
+              y: coordinate.describe("1〜5"),
+              note: z
+                .string()
+                .describe("このサービスとの違いを1文（20〜60字程度）で。である調。"),
+            }),
+          )
+          .describe("similarServices と同じものを2〜4件。同じ座標に重ねない。"),
+        takeaway: z
+          .string()
+          .describe(
+            "この図から読み取れる立ち位置と、空いている領域。1〜2文（40〜120字程度）。である調。",
+          ),
+        status,
+      })
+      .describe(
+        "類似サービスとの位置関係を2軸の図にするためのデータ。" +
+          "2つの軸は、これらのサービスが最もばらつく観点を選ぶ（価格だけ・品質だけの軸は避ける）。",
+      ),
   }),
 
   insights: z.object({
     strengths: z.array(z.string()).describe("このサービスの強み。3〜4件。文体はである調。"),
+    weaknesses: z
+      .array(z.string())
+      .describe("サイトから読み取れる弱み・足りないもの。2〜4件。文体はである調。"),
+    threats: z
+      .array(z.string())
+      .describe("外部の脅威（競合・代替手段・市場の変化）。2〜4件。文体はである調。"),
     differentiation: z.array(z.string()).describe("差別化ポイント。2〜4件。文体はである調。"),
     userNeeds: z
       .array(z.string())
@@ -352,4 +411,69 @@ export function evidenceFor(analysis: SaasAnalysis, topic: string): AnalysisEvid
   return analysis.evidence.filter(
     (item) => item.topic === topic || item.topic.startsWith(`${topic}.`),
   );
+}
+
+export type MarketPositioning = SaasAnalysis["market"]["positioning"];
+
+/**
+ * The stored positioning map, or null when there is not one — the same
+ * guard as assessmentOf, for every analysis written before the map existed,
+ * and for a model that returned axes with nothing to plot on them.
+ */
+export function positioningOf(analysis: SaasAnalysis): MarketPositioning | null {
+  const positioning = analysis.market.positioning as MarketPositioning | undefined;
+  if (!positioning?.xAxis || !positioning.yAxis || !positioning.self) return null;
+  if (!Array.isArray(positioning.others) || positioning.others.length === 0) return null;
+  return positioning;
+}
+
+/**
+ * The four SWOT lists, with the two that older analyses lack read as empty.
+ * Opportunities stand in for O as they are; S, W, T come from `insights`.
+ */
+export function swotOf(analysis: SaasAnalysis): {
+  strengths: string[];
+  weaknesses: string[];
+  opportunities: string[];
+  threats: string[];
+} {
+  const { insights } = analysis;
+  return {
+    strengths: insights.strengths ?? [],
+    weaknesses: insights.weaknesses ?? [],
+    opportunities: insights.opportunities ?? [],
+    threats: insights.threats ?? [],
+  };
+}
+
+export type StatusTally = Record<ClaimStatus, number>;
+
+/**
+ * How much of the report the site actually said, counted over every claim
+ * that carries a status. The one number that tells a reader how far to lean
+ * on the page before they have read any of it.
+ */
+export function claimStatusTally(analysis: SaasAnalysis): StatusTally {
+  const { service, targetUsers, business, market } = analysis;
+  const statuses: ClaimStatus[] = [
+    service.what.status,
+    service.who.status,
+    service.problems.status,
+    service.valueProposition.status,
+    service.features.status,
+    service.usage.status,
+    targetUsers.status,
+    business.pricing.status,
+    business.model.status,
+    business.audienceType.status,
+    business.revenueSource.status,
+    market.category.status,
+    market.industry.status,
+    market.similarServices.status,
+  ];
+  const tally: StatusTally = { confirmed: 0, inferred: 0, unknown: 0 };
+  for (const value of statuses) {
+    if (value in tally) tally[value] += 1;
+  }
+  return tally;
 }

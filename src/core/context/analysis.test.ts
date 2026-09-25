@@ -5,6 +5,9 @@ import {
   SaasAnalysisSchema,
   assessmentOf,
   assessmentRows,
+  claimStatusTally,
+  positioningOf,
+  swotOf,
   overallScore,
   weakestAxisKey,
   type SaasAnalysis,
@@ -97,5 +100,75 @@ describe("SaasAnalysisSchema", () => {
       SaasAnalysisSchema.shape.assessment.shape.clarity.parse({ score: 3.4, comment: "理由" })
         .score,
     ).toBe(3);
+  });
+});
+
+describe("positioningOf", () => {
+  const withMarket = (positioning: unknown) =>
+    ({ market: { positioning } }) as unknown as SaasAnalysis;
+  const map = {
+    xAxis: { label: "x", low: "低", high: "高" },
+    yAxis: { label: "y", low: "低", high: "高" },
+    self: { x: 2, y: 3 },
+    others: [{ name: "A", x: 4, y: 4, note: "違い" }],
+    takeaway: "空きがある",
+    status: "inferred",
+  };
+
+  it("returns the map when there is one", () => {
+    expect(positioningOf(withMarket(map))).not.toBeNull();
+  });
+
+  /** Analyses stored before the map existed have to keep rendering. */
+  it("returns null for an analysis written before the map existed", () => {
+    expect(positioningOf(withMarket(undefined))).toBeNull();
+  });
+
+  it("returns null when there is nothing to plot beside this service", () => {
+    expect(positioningOf(withMarket({ ...map, others: [] }))).toBeNull();
+  });
+});
+
+describe("SaasAnalysisSchema positioning", () => {
+  it("clamps a coordinate outside 1-5 without rounding it", () => {
+    const self = SaasAnalysisSchema.shape.market.shape.positioning.shape.self;
+    expect(self.parse({ x: 9, y: 3.5 })).toEqual({ x: 5, y: 3.5 });
+  });
+});
+
+describe("swotOf", () => {
+  it("reads the lists older analyses lack as empty", () => {
+    const old = {
+      insights: { strengths: ["s"], differentiation: [], userNeeds: [], opportunities: ["o"] },
+    } as unknown as SaasAnalysis;
+
+    expect(swotOf(old)).toEqual({ strengths: ["s"], weaknesses: [], opportunities: ["o"], threats: [] });
+  });
+});
+
+describe("claimStatusTally", () => {
+  it("counts every claim by its standing", () => {
+    const text = (status: string) => ({ value: "v", status });
+    const list = (status: string) => ({ items: ["i"], status });
+    const analysis = {
+      service: {
+        what: text("confirmed"),
+        who: text("inferred"),
+        problems: list("inferred"),
+        valueProposition: list("confirmed"),
+        features: list("confirmed"),
+        usage: text("unknown"),
+      },
+      targetUsers: { primary: [], secondary: [], status: "inferred" },
+      business: {
+        pricing: text("unknown"),
+        model: text("unknown"),
+        audienceType: text("inferred"),
+        revenueSource: text("inferred"),
+      },
+      market: { category: text("confirmed"), industry: text("inferred"), similarServices: list("inferred") },
+    } as unknown as SaasAnalysis;
+
+    expect(claimStatusTally(analysis)).toEqual({ confirmed: 4, inferred: 7, unknown: 3 });
   });
 });

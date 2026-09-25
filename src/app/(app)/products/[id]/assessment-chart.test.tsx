@@ -23,7 +23,7 @@ describe("AssessmentChart", () => {
     render(<AssessmentChart assessment={assessment()} />);
 
     // (4 + 3 + 3 + 2 + 4 + 1) / 6 = 2.8
-    expect(screen.getByText("2.8")).toBeInTheDocument();
+    expect(screen.getByText(/総合 2\.8 \/ 5/)).toBeInTheDocument();
     expect(screen.getByText("価値の明確さ")).toBeInTheDocument();
     expect(screen.getByText("収益への道筋")).toBeInTheDocument();
   });

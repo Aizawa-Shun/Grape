@@ -10,11 +10,25 @@ import { cx } from "./cx";
  * layout visibly shifted every time you moved between them. A page now says
  * what it contains, not how wide it is.
  */
-export function Page({ children, className }: { children: ReactNode; className?: string }) {
+export function Page({
+  children,
+  className,
+  width = "reading",
+}: {
+  children: ReactNode;
+  className?: string;
+  /**
+   * "wide" for a page whose content is charts and diagrams laid side by side
+   * — the analysis report — where a reading column would shrink every figure
+   * to the width of a paragraph.
+   */
+  width?: "reading" | "wide";
+}) {
   return (
     <div
       className={cx(
-        "mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-4 py-8 sm:px-6 sm:py-12",
+        "mx-auto flex w-full flex-1 flex-col gap-8 px-4 py-8 sm:px-6 sm:py-12",
+        width === "wide" ? "max-w-5xl" : "max-w-2xl",
         className,
       )}
     >

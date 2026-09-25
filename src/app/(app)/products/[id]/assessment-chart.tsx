@@ -51,7 +51,7 @@ function Bar({ score, emphasised }: { score: number; emphasised: boolean }) {
     // stop rather than by reading the number twice.
     <div
       aria-hidden="true"
-      className="relative h-2 w-full overflow-hidden rounded-sm bg-surface-sunken"
+      className="relative h-4 w-full overflow-hidden rounded-sm bg-surface-sunken"
     >
       {SCALE_STEPS.slice(0, -1).map((step) => (
         <span
@@ -79,24 +79,18 @@ export function AssessmentChart({ assessment }: { assessment: SaasAssessment }) 
 
   return (
     <Card className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <div className="flex items-baseline gap-2">
-          {/* Proportional figures, not tabular: this one stands alone, and
-              tabular-nums only earns its keep in the column below. */}
-          <span className="text-2xl font-semibold">{overall.toFixed(1)}</span>
-          <span className="text-sm text-text-muted">/ {ASSESSMENT_MAX_SCORE}</span>
-        </div>
-        <p className="text-xs text-text-muted">
-          サイトから読み取れた範囲での採点。低い軸ほど、いま手を入れて効く。
-        </p>
-      </div>
+      {/* The overall figure is the report's headline (the ring above), so
+          this card starts straight on the axes. */}
+      <p className="text-xs text-text-muted">
+        サイトから読み取れた範囲での採点（総合 {overall.toFixed(1)} / {ASSESSMENT_MAX_SCORE}）。低い軸ほど、いま手を入れて効く。
+      </p>
 
       <dl className="flex flex-col divide-y divide-border">
         {rows.map((row) => {
           const emphasised = row.key === weakest;
 
           return (
-            <div key={row.key} className="grid gap-1.5 py-3 first:pt-0 last:pb-0 sm:grid-cols-[10rem_1fr] sm:gap-4">
+            <div key={row.key} className="grid gap-1.5 py-3 first:pt-0 last:pb-0 sm:grid-cols-[11rem_1fr] sm:gap-6">
               <dt className="flex flex-wrap items-center gap-2 text-sm text-text-muted">
                 {row.label}
                 {emphasised && <Badge tone="attention">最優先</Badge>}
@@ -105,7 +99,7 @@ export function AssessmentChart({ assessment }: { assessment: SaasAssessment }) 
                 <div className="flex items-center gap-3">
                   <Bar score={row.score} emphasised={emphasised} />
                   <span className="flex shrink-0 items-baseline gap-1.5">
-                    <span className="text-sm font-medium tabular-nums">{row.score}</span>
+                    <span className="text-lg font-semibold tabular-nums">{row.score}</span>
                     <span className="text-xs text-text-muted">{SCORE_WORDS[row.score]}</span>
                   </span>
                 </div>
