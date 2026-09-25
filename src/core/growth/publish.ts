@@ -92,7 +92,14 @@ export async function approvePost(postId: string, options: ApproveOptions = {}):
     throw new AppError("POLICY_BLOCKED", `Blocked by policy: ${blockers.join(" ")}`, { hint: blockers.join(" ") });
   }
 
-  const base = { text, decidedAt: now, costEstimateUsd: viaX ? estimateXPostCostUsd(text) : 0, error: null };
+  const base = {
+    text,
+    // The agent's own words, kept the first time a person changes them.
+    draftText: post.draftText ?? (text !== post.text.trim() ? post.text : null),
+    decidedAt: now,
+    costEstimateUsd: viaX ? estimateXPostCostUsd(text) : 0,
+    error: null,
+  };
   const who = options.automatic ? "エージェントが" : "";
 
   if (!viaX) {

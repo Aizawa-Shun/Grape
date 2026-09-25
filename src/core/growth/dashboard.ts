@@ -7,7 +7,7 @@ import { attributePosts, eventsSince, GROWTH_UTM_CAMPAIGN, goalProgress, type Go
 import { latestInsights } from "./latest";
 import { getPolicy } from "./policy";
 import { activeRun } from "./runs";
-import { activeGoal, latestReport } from "./steps";
+import { activeGoal, latestReport } from "./latest";
 
 /**
  * Everything the growth home shows, gathered in one place and counted in

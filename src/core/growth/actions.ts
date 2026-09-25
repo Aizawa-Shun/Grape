@@ -15,7 +15,8 @@ import { scoreCandidates } from "./agents/opportunity-finder";
 import type { AgentDeps } from "./agents/shared";
 import { renderKnowledgePrefix, requireKnowledge } from "./knowledge";
 import { latestIcps } from "./latest";
-import { createReplyDraft } from "./steps";
+import { tokyoDay } from "./policy";
+import { createReplyDraft, writePosts } from "./steps";
 import { xStatusId } from "./tracking";
 
 /**
@@ -154,4 +155,31 @@ export async function saveBrandVoice(productId: string, samples: string[], conn:
   await conn.productKnowledge.update(productId, { brandVoice: voice, updatedAt: new Date() });
   await recordAction({ productId, kind: "brand_voice.learned", summary: `あなたの文体を${samples.length}件のサンプルから学びました` }, conn);
   return voice;
+}
+
+/**
+ * "投稿のネタにする": a conversation that is better answered in public than in
+ * a reply — the question many people share. The post is written about the
+ * problem, never about the person: nothing that would identify them is
+ * quoted, and it takes no day in the week's plan.
+ */
+export async function draftPostFromOpportunity(opportunity: Opportunity, conn: Database = db): Promise<Post> {
+  const product = await conn.products.get(opportunity.productId);
+  if (!product) throw new AppError("NOT_FOUND", `Unknown product: ${opportunity.productId}`);
+  const knowledge = await requireKnowledge(product.id, conn);
+  const topic =
+    "見込み客のこの悩みに、公開の投稿として答える（投稿者を特定できる引用・名前は出さない）: " +
+    opportunity.text.replace(/\s+/g, " ").slice(0, 400);
+  const [post] = await writePosts(
+    product,
+    knowledge,
+    [{ day: 0, pillar: "Problem awareness", postType: opportunity.intent === "question" ? "educational" : "problem_awareness", topic, date: tokyoDay(new Date()) }],
+    await depsFor(product, conn),
+    conn,
+    { plan: false },
+  );
+  if (!post) throw new AppError("LLM_BAD_OUTPUT", "No post was written for the opportunity");
+  await conn.opportunities.update(opportunity.id, { status: "drafted" });
+  await recordAction({ productId: product.id, kind: "post.drafted_from_opportunity", summary: "見込み客の会話から投稿案を作りました" }, conn);
+  return post;
 }

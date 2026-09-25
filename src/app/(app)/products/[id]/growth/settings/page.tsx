@@ -6,7 +6,7 @@ import { TextLink } from "@/components/ui/text-link";
 import { DEFAULT_GOAL } from "@/core/growth/goals";
 import { getKnowledge } from "@/core/growth/knowledge";
 import { getPolicy } from "@/core/growth/policy";
-import { activeGoal } from "@/core/growth/steps";
+import { activeGoal } from "@/core/growth/latest";
 import { findOwnedProduct } from "@/core/product/ownership";
 import { loadSettings } from "@/core/settings";
 import { requireUser } from "@/server/auth/current-user";

@@ -8,7 +8,7 @@ import { loadGrowthDashboard } from "./dashboard";
 import { setGoal } from "./goals";
 import { markPublished } from "./publish";
 import { driveRun } from "./runs";
-import type { StepServices } from "./steps";
+import { writePosts, type StepServices } from "./steps";
 import type { ConversationSource } from "./sources/types";
 
 /**
@@ -255,5 +255,33 @@ describe("the growth loop", () => {
     expect(after.week).toMatchObject({ posts: 3, visits: 1, signups: 1 });
     expect(after.recommendation).toMatchObject({ source: "analysis" });
     expect(after.activity.length).toBeGreaterThan(5);
+  });
+
+  it("writes a one-off post from a conversation without taking a day in the plan", async () => {
+    const { conn, product } = await seedProduct();
+    await conn.productKnowledge.set(product.id, {
+      productId: product.id,
+      summary: "s",
+      problem: "p",
+      solution: "s",
+      targetUser: "t",
+      usp: [],
+      useCases: [],
+      features: [],
+      pricing: "",
+      marketingAngles: [],
+      contextVersion: 1,
+    });
+    const knowledge = (await conn.productKnowledge.get(product.id))!;
+    const [post] = await writePosts(
+      product,
+      knowledge,
+      [{ day: 0, pillar: "Problem awareness", postType: "problem_awareness", topic: "t", date: "2026-09-26" }],
+      { provider: fakeProvider([]), system: "", language: "ja" },
+      conn,
+      { plan: false },
+    );
+    expect(post).toMatchObject({ kind: "post", status: "draft", plannedFor: null });
+    expect(post.trackingUrl).toContain(`utm_content=${post.id}`);
   });
 });

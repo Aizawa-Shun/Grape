@@ -2,8 +2,8 @@ import { contextVersions } from "@/core/context/edit";
 import { AppError } from "@/core/errors";
 import { getProvider, llmAvailable, type LLMProvider } from "@/core/llm";
 import { db, type Database } from "@/db/client";
-import type { GrowthRun, GrowthStepKind, Post, Product, ProductKnowledge } from "@/db/schema";
-import { by, firstBy } from "@/db/sort";
+import type { GrowthRun, GrowthStepKind, PlanSlot, Post, Product, ProductKnowledge } from "@/db/schema";
+import { by } from "@/db/sort";
 
 import { runCompetitorAnalyzer } from "./agents/competitor-analyzer";
 import { runContentGenerator } from "./agents/content-generator";
@@ -17,7 +17,8 @@ import type { AgentDeps } from "./agents/shared";
 import { runStrategyPlanner } from "./agents/strategy-planner";
 import { attributionFor } from "./attribution";
 import { renderKnowledgePrefix, requireKnowledge } from "./knowledge";
-import { activeStrategy, latestCompetitors, latestIcps, latestInsights } from "./latest";
+import { buildAgentMemory, renderMemory } from "./memory";
+import { activeGoal, activeStrategy, latestCompetitors, latestIcps, latestInsights, latestReport } from "./latest";
 import { mixOf, reweightPillars, typeStats, MIN_POSTS_TO_LEARN, type PostPerformance } from "./performance";
 import { planWeek } from "./mix";
 import { getPolicy, tokyoDay } from "./policy";
@@ -228,17 +229,32 @@ async function contentStep({ run, product, conn, now, services }: StepContext): 
     .map((slot) => ({ ...slot, date: tokyoDay(new Date(now.getTime() + slot.day * DAY_MS)) }))
     .filter((slot) => slot.day < DRAFT_DAYS_AHEAD && !taken.has(slot.date));
 
-  const [insights, icps, competitors, report] = await Promise.all([
+  const drafts = await writePosts(product, knowledge, slots, deps, conn, { runId: run.id });
+  const replies = await draftReplies({ run, product, conn, now, services }, knowledge, deps, policy.maxRepliesPerDay);
+  return `投稿案${drafts.length}件、返信案${replies}件を作りました`;
+}
+
+/**
+ * Writes posts for the given slots and saves them as drafts — shared by the
+ * daily plan and by "投稿のネタにする" on a conversation. `plan: false` keeps
+ * a one-off post out of the week's plan, so it does not take a day's slot.
+ */
+export async function writePosts(
+  product: Product,
+  knowledge: ProductKnowledge,
+  slots: (PlanSlot & { date: string })[],
+  deps: AgentDeps,
+  conn: Database,
+  options: { runId?: string | null; plan?: boolean } = {},
+): Promise<Post[]> {
+  if (slots.length === 0) return [];
+  const [insights, icps, competitors, policy, memory] = await Promise.all([
     latestInsights(product.id, conn),
     latestIcps(product.id, conn),
     latestCompetitors(product.id, conn),
-    latestReport(product.id, conn),
+    getPolicy(product.id, conn),
+    buildAgentMemory(product.id, conn),
   ]);
-  const rejected = posts
-    .filter((p) => p.status === "rejected" && p.error)
-    .sort(by((p) => p.decidedAt ?? p.createdAt, "desc"))
-    .slice(0, 5)
-    .map((p) => `避ける: ${p.error}`);
 
   const drafts = await runContentGenerator(
     {
@@ -246,35 +262,36 @@ async function contentStep({ run, product, conn, now, services }: StepContext): 
       brandVoice: knowledge.brandVoice,
       userPhrases: insights.flatMap((i) => i.userPhrases),
       icpNames: icps.map((i) => i.name),
-      learnings: [...(report?.worked ?? []), ...rejected],
+      memory: renderMemory(memory, "post"),
       policy,
       competitorNames: competitors.map((c) => c.name),
     },
     deps,
   );
 
+  const saved: Post[] = [];
   for (const draft of drafts) {
     const id = crypto.randomUUID();
     const link = draft.includeLink ? trackingUrl(product.url, id) : null;
-    await conn.posts.insert({
-      id,
-      productId: product.id,
-      runId: run.id,
-      kind: "post",
-      postType: draft.postType,
-      pillar: draft.pillar,
-      hook: draft.hook,
-      body: draft.body,
-      cta: draft.cta,
-      text: link ? `${draft.text}\n${link}` : draft.text,
-      rationale: draft.rationale,
-      trackingUrl: link,
-      plannedFor: draft.plannedFor,
-    });
+    saved.push(
+      await conn.posts.insert({
+        id,
+        productId: product.id,
+        runId: options.runId ?? null,
+        kind: "post",
+        postType: draft.postType,
+        pillar: draft.pillar,
+        hook: draft.hook,
+        body: draft.body,
+        cta: draft.cta,
+        text: link ? `${draft.text}\n${link}` : draft.text,
+        rationale: draft.rationale,
+        trackingUrl: link,
+        plannedFor: options.plan === false ? null : draft.plannedFor,
+      }),
+    );
   }
-
-  const replies = await draftReplies({ run, product, conn, now, services }, knowledge, deps, policy.maxRepliesPerDay);
-  return `投稿案${drafts.length}件、返信案${replies}件を作りました`;
+  return saved;
 }
 
 /** Reply drafts for the most relevant new conversations, up to the day's reply limit. */
@@ -309,7 +326,8 @@ export async function createReplyDraft(
   const opportunity = await conn.opportunities.get(opportunityId);
   if (!opportunity || opportunity.productId !== product.id) throw new AppError("NOT_FOUND", `Unknown opportunity: ${opportunityId}`);
   const policy = await getPolicy(product.id, conn);
-  const draft = await runReplyGenerator({ opportunity, brandVoice: knowledge.brandVoice, policy }, deps);
+  const memory = renderMemory(await buildAgentMemory(product.id, conn), "reply");
+  const draft = await runReplyGenerator({ opportunity, brandVoice: knowledge.brandVoice, policy, memory }, deps);
   const post = await conn.posts.insert({
     productId: product.id,
     runId,
@@ -443,18 +461,6 @@ async function autopilotStep({ product, conn, now }: StepContext): Promise<strin
   }
   const reasons = [...new Set(held)].join(" ");
   return `ルールの範囲で${sent}件を実行しました${held.length ? `。${held.length}件は保留: ${reasons}` : ""}`;
-}
-
-// --- helpers shared with the pages ------------------------------------------
-
-export async function activeGoal(productId: string, conn: Database = db) {
-  const goals = await conn.growthGoals.find({ where: [["productId", "==", productId], ["status", "==", "active"]] });
-  return firstBy(goals, by((goal) => goal.createdAt, "desc"));
-}
-
-export async function latestReport(productId: string, conn: Database = db) {
-  const reports = await conn.analyticsReports.find({ where: [["productId", "==", productId]] });
-  return firstBy(reports, by((report) => report.createdAt, "desc"));
 }
 
 const STEPS: Record<GrowthStepKind, (context: StepContext) => Promise<string>> = {

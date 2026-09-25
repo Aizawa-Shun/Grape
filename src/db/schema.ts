@@ -570,6 +570,13 @@ export interface Post {
   cta: string;
   /** Exactly what would be sent. */
   text: string;
+  /**
+   * What the agent first wrote, kept when a person edits `text` before
+   * approving. The difference between the two is the clearest statement of
+   * their preferences there is, and Agent Memory (core/growth/memory.ts)
+   * shows it to the next drafts.
+   */
+  draftText: string | null;
   rationale: string;
   opportunityId: string | null;
   replyToUrl: string | null;

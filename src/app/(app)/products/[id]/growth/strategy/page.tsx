@@ -5,7 +5,8 @@ import { Callout } from "@/components/ui/callout";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Page, PageHeader, Section } from "@/components/ui/page";
 import { tokyoDay } from "@/core/growth/policy";
-import { latestReport } from "@/core/growth/steps";
+import { latestReport } from "@/core/growth/latest";
+import { buildAgentMemory, isEmptyMemory } from "@/core/growth/memory";
 import { findOwnedProduct } from "@/core/product/ownership";
 import { db } from "@/db/client";
 import { by } from "@/db/sort";
@@ -32,7 +33,11 @@ export default async function GrowthStrategyPage({ params }: { params: Promise<{
   const product = await findOwnedProduct(id, (await requireUser()).id);
   if (!product) notFound();
 
-  const [strategies, report] = await Promise.all([db.strategies.find({ where: [["productId", "==", id]] }), latestReport(id)]);
+  const [strategies, report, memory] = await Promise.all([
+    db.strategies.find({ where: [["productId", "==", id]] }),
+    latestReport(id),
+    buildAgentMemory(id),
+  ]);
   const history = strategies.sort(by((s) => s.version, "desc"));
   const strategy = history[0] ?? null;
 
@@ -217,6 +222,36 @@ export default async function GrowthStrategyPage({ params }: { params: Promise<{
           </div>
         )}
       </Section>
+
+      <Section
+        title="AIが覚えていること（Agent Memory）"
+        description="次の投稿と返信を書くときに、AIが毎回読み返している内容です。実際の結果・あなたの書き直し・見送った理由から作っています。"
+      >
+        {isEmptyMemory(memory) ? (
+          <p className="text-sm text-text-muted">まだありません。投稿を公開したり、案を直して承認したり、理由を添えて見送ったりすると、ここに貯まります。</p>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2">
+            <MemoryList title="結果が良かった投稿" items={memory.worked.map((p) => `「${p.hook || p.text}」— ${p.outcome}`)} />
+            <MemoryList title="反応が無かった投稿" items={memory.didNotWork.map((p) => `「${p.hook || p.text}」— ${p.outcome}`)} />
+            <MemoryList title="見送った案と理由" items={memory.rejected.map((r) => `「${r.text.slice(0, 60)}」— ${r.reason}`)} />
+            <MemoryList title="あなたの書き直し" items={memory.rewrites.map((r) => `「${r.before.slice(0, 50)}」→「${r.after.slice(0, 50)}」`)} />
+          </div>
+        )}
+      </Section>
     </Page>
+  );
+}
+
+function MemoryList({ title, items }: { title: string; items: string[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div>
+      <p className="text-xs font-medium text-text-muted">{title}</p>
+      <ul className="mt-1 flex flex-col gap-1 text-sm">
+        {items.map((item) => (
+          <li key={item}>・ {item}</li>
+        ))}
+      </ul>
+    </div>
   );
 }

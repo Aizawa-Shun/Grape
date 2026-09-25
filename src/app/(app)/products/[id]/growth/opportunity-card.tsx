@@ -21,16 +21,16 @@ export function OpportunityCard({ opportunity, productId }: { opportunity: Oppor
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  const [busy, setBusy] = useState<"reply" | "dismiss" | null>(null);
+  const [busy, setBusy] = useState<"reply" | "post" | "dismiss" | null>(null);
 
-  function act(kind: "reply" | "dismiss") {
+  function act(kind: "reply" | "post" | "dismiss") {
     setBusy(kind);
     setError(null);
     startTransition(async () => {
       const result = await send(`/api/growth/opportunities/${opportunity.id}/${kind}`, "POST");
       setBusy(null);
       if (!result.ok) return setError(result.error);
-      if (kind === "reply") router.push(`/products/${productId}/growth/posts#drafts`);
+      if (kind !== "dismiss") router.push(`/products/${productId}/growth/posts#drafts`);
       router.refresh();
     });
   }
@@ -71,14 +71,27 @@ export function OpportunityCard({ opportunity, productId }: { opportunity: Oppor
         <span className="flex-1" />
         {opportunity.status === "drafted" ? (
           <Link href={`/products/${productId}/growth/posts#drafts`} className="text-xs font-medium underline-offset-2 hover:underline">
-            返信案を見る
+            作った案を見る
           </Link>
         ) : (
           <>
             <Button size="sm" variant="ghost" loading={pending && busy === "dismiss"} onClick={() => act("dismiss")}>
               見送る
             </Button>
-            <Button size="sm" variant="primary" loading={pending && busy === "reply"} onClick={() => act("reply")}>
+            <Button
+              size="sm"
+              variant={opportunity.recommendedAction === "content" ? "primary" : "secondary"}
+              loading={pending && busy === "post"}
+              onClick={() => act("post")}
+            >
+              投稿のネタにする
+            </Button>
+            <Button
+              size="sm"
+              variant={opportunity.recommendedAction === "content" ? "secondary" : "primary"}
+              loading={pending && busy === "reply"}
+              onClick={() => act("reply")}
+            >
               返信案を作る
             </Button>
           </>

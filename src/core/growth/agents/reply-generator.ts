@@ -54,6 +54,8 @@ export interface ReplyGeneratorInput {
   opportunity: Pick<Opportunity, "text" | "author" | "source" | "relevance" | "intent" | "reasons">;
   brandVoice: BrandVoice | null;
   policy: Pick<GrowthPolicy, "promotionalIntensity">;
+  /** Agent Memory, rendered for replies: past rejections and rewrites. */
+  memory?: string;
 }
 
 export function composeReply(reply: string, bridge: string, allowBridge: boolean, forX: boolean): { text: string; mentionsProduct: boolean } {
@@ -98,6 +100,7 @@ ${renderBrandVoice(input.brandVoice)}`;
       "",
       "# この投稿を見込みと判断した理由",
       input.opportunity.reasons.map((r) => `- ${r}`).join("\n"),
+      input.memory ? `\n${input.memory}` : "",
     ].join("\n"),
   });
 

@@ -125,3 +125,13 @@ describe("rejectPost", () => {
     expect(rejected).toMatchObject({ status: "rejected", error: "宣伝っぽい" });
   });
 });
+
+describe("approvePost and Agent Memory", () => {
+  it("keeps the agent's original words when a person rewrites them", async () => {
+    const conn = createMemoryStore();
+    dryRun = true;
+    const post = await seed(conn);
+    const approved = await approvePost(post.id, { database: conn, now: noon, text: "自分の言葉で書き直した" });
+    expect(approved).toMatchObject({ text: "自分の言葉で書き直した", draftText: post.text });
+  });
+});

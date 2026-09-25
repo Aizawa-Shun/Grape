@@ -1,5 +1,5 @@
 import { db, type Database } from "@/db/client";
-import type { Competitor, Icp, MarketInsight, MarketingStrategy } from "@/db/schema";
+import type { AnalyticsReport, Competitor, GrowthGoal, Icp, MarketInsight, MarketingStrategy } from "@/db/schema";
 import { by, firstBy } from "@/db/sort";
 
 /**
@@ -39,4 +39,14 @@ export async function latestInsights(productId: string, conn: Database = db): Pr
 export async function activeStrategy(productId: string, conn: Database = db): Promise<MarketingStrategy | null> {
   const rows = await conn.strategies.find({ where: [["productId", "==", productId]] });
   return firstBy(rows, by((strategy) => strategy.version, "desc"));
+}
+
+export async function activeGoal(productId: string, conn: Database = db): Promise<GrowthGoal | null> {
+  const goals = await conn.growthGoals.find({ where: [["productId", "==", productId], ["status", "==", "active"]] });
+  return firstBy(goals, by((goal) => goal.createdAt, "desc"));
+}
+
+export async function latestReport(productId: string, conn: Database = db): Promise<AnalyticsReport | null> {
+  const reports = await conn.analyticsReports.find({ where: [["productId", "==", productId]] });
+  return firstBy(reports, by((report) => report.createdAt, "desc"));
 }

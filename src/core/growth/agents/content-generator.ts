@@ -52,8 +52,8 @@ export interface ContentGeneratorInput {
   brandVoice: BrandVoice | null;
   userPhrases: string[];
   icpNames: string[];
-  /** What worked before, from the latest performance report. */
-  learnings: string[];
+  /** Agent Memory, already rendered for posts (core/growth/memory.ts). Empty on day one. */
+  memory: string;
   policy: Pick<GrowthPolicy, "promotionalIntensity" | "competitorMentions">;
   competitorNames: string[];
 }
@@ -147,7 +147,7 @@ ${renderBrandVoice(input.brandVoice)}`;
     input.userPhrases.slice(0, 12).map((p) => `- ${p}`).join("\n") || "(なし)",
     "",
     `# 想定読者（ICP）: ${input.icpNames.join(" / ") || "(未設定)"}`,
-    input.learnings.length ? `\n# これまでに反応が良かったこと\n${input.learnings.map((l) => `- ${l}`).join("\n")}` : "",
+    input.memory ? `\n${input.memory}` : "",
   ].join("\n");
 
   const { value } = await deps.provider.completeStructured({
