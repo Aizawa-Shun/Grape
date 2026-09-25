@@ -47,4 +47,5 @@ export const INSIGHT_LABELS = {
   unmet_need: "満たされていないニーズ",
   trend: "話題のテーマ",
   gap: "まだ誰も訴求していない領域",
+  competitor_move: "競合の動き",
 } as const;

@@ -116,6 +116,29 @@ export default async function GrowthPage({ params }: { params: Promise<{ id: str
             )}
           </Section>
 
+          {dashboard.moves.length > 0 && (
+            <Section title="競合の動き" description="競合の公式サイトを毎日読み比べて、訴求・価格・呼びかけが変わったときに知らせます。">
+              <ul className="flex flex-col gap-2">
+                {dashboard.moves.map((move) => (
+                  <li key={move.id} className="flex flex-col gap-1 rounded-md border border-border bg-surface p-3 text-sm shadow-card">
+                    <span className="text-xs text-text-subtle">
+                      {move.createdAt.toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" })}
+                      {move.sources[0] && (
+                        <>
+                          {" ・ "}
+                          <a href={move.sources[0].url} target="_blank" rel="noopener noreferrer" className="underline-offset-2 hover:underline">
+                            {move.sources[0].title}
+                          </a>
+                        </>
+                      )}
+                    </span>
+                    <p className="whitespace-pre-line">{move.statement}</p>
+                  </li>
+                ))}
+              </ul>
+            </Section>
+          )}
+
           {dashboard.contentIdeas.length > 0 && (
             <Section title="投稿のネタになりそうなこと" description="市場調査と競合調査で見つかった、まだ誰も十分に言っていないこと。">
               <ul className="grid gap-3 md:grid-cols-2">

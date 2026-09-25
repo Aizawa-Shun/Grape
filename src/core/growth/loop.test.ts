@@ -240,11 +240,13 @@ describe("the growth loop", () => {
     await conn.events.insert({ productId: product.id, anonId: "a1", sessionId: "s1", name: "signup", ts: new Date(Date.now() + 1000) });
 
     // The next daily run reads the results and learns.
-    expect(await planSteps(product.id, "daily", conn)).toEqual(["metrics", "performance", "opportunities", "content"]);
+    expect(await planSteps(product.id, "daily", conn)).toEqual(["metrics", "performance", "watch", "opportunities", "content"]);
     const { run: daily } = await startGrowthRun(product.id, "u1", "daily", conn);
     const learned = await driveRun(daily.id, growthExecutor(conn, services), 60_000, conn);
     expect(learned?.steps.find((s) => s.kind === "metrics")?.status).toBe("skipped"); // no X credentials: site data only
     expect(learned?.steps.find((s) => s.kind === "performance")?.status).toBe("completed");
+    // RivalApp's homepage reads the same as last week: checked, nothing to report.
+    expect(learned?.steps.find((s) => s.kind === "watch")).toMatchObject({ status: "completed", summary: expect.stringContaining("変化はありません") });
 
     const [report] = await conn.analyticsReports.find();
     expect(report.recommendation).toContain("How-to");

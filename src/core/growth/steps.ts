@@ -29,6 +29,7 @@ import { fetchPublicPage, type PublicPage } from "./sources/page";
 import type { ConversationSource } from "./sources/types";
 import type { WebResearcher } from "./sources/web";
 import { trackingUrl } from "./tracking";
+import { watchCompetitors } from "./watch";
 
 /**
  * What each step of a growth run does against the database. The agents
@@ -137,7 +138,7 @@ async function competitorsStep({ run, product, conn, services }: StepContext): P
     productId: product.id,
   });
   for (const competitor of result.competitors) {
-    await conn.competitors.insert({ productId: product.id, runId: run.id, ...competitor });
+    await conn.competitors.insert({ productId: product.id, runId: run.id, ...competitor, snapshotAt: competitor.snapshot ? new Date() : null });
   }
   for (const gap of result.gaps) {
     await conn.marketInsights.insert({ productId: product.id, runId: run.id, kind: "gap", statement: gap.statement, userPhrases: [], sources: gap.sources, grounded: gap.grounded });
@@ -175,6 +176,15 @@ async function strategyStep({ run, product, conn, services }: StepContext): Prom
   );
   await conn.strategies.insert({ productId: product.id, runId: run.id, version: (previous?.version ?? 0) + 1, origin: "planner", ...draft });
   return `戦略を立てました。柱: ${draft.pillars.map((p) => `${p.name} ${p.share}%`).join(" / ")}`;
+}
+
+async function watchStep({ run, product, conn, now, services }: StepContext): Promise<string> {
+  const competitors = (await latestCompetitors(product.id, conn)).filter((c) => c.url && c.snapshot);
+  if (competitors.length === 0) throw new StepSkipped("見張れる競合（公式サイトを読めた競合）がまだありません");
+  const result = await watchCompetitors(competitors, services.fetchPage ?? ((url) => fetchPublicPage(url)), run.id, conn, now);
+  const unreachable = result.unreachable ? `（${result.unreachable}社は読めず）` : "";
+  if (result.moves.length === 0) return `${result.checked}社のサイトを確認しました。変化はありません${unreachable}`;
+  return `${result.checked}社を確認し、${result.moves.map((m) => m.competitor.name).join("・")}に変化がありました${unreachable}`;
 }
 
 // --- opportunities ----------------------------------------------------------
@@ -474,6 +484,7 @@ const STEPS: Record<GrowthStepKind, (context: StepContext) => Promise<string>> =
   metrics: metricsStep,
   performance: performanceStep,
   autopilot: autopilotStep,
+  watch: watchStep,
 };
 
 export async function executeStep(

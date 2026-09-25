@@ -32,7 +32,8 @@ export async function latestCompetitors(productId: string, conn: Database = db):
 export async function latestInsights(productId: string, conn: Database = db): Promise<MarketInsight[]> {
   const rows = await conn.marketInsights.find({ where: [["productId", "==", productId]] });
   const gaps = latestSet(rows.filter((row) => row.kind === "gap"));
-  const market = latestSet(rows.filter((row) => row.kind !== "gap"));
+  // Competitor moves accumulate day by day and are read by watch.ts's recentMoves.
+  const market = latestSet(rows.filter((row) => row.kind !== "gap" && row.kind !== "competitor_move"));
   return [...market, ...gaps];
 }
 

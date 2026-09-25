@@ -21,6 +21,9 @@ import { cleanList, COMMON_RULES, groundedSources, renderSources, type AgentDeps
  * is never shown as though somebody had checked it.
  */
 
+/** What research may report. Competitor moves come only from the watch step's diff, never from a model. */
+const RESEARCH_KINDS = INSIGHT_KINDS.filter((kind) => kind !== "competitor_move") as [InsightKind, ...InsightKind[]];
+
 export const QueryPlan = z.object({
   queries: z.array(z.string()).describe("ユーザーが問題を検索するときの語句を4〜6件。指定言語で。"),
   englishQueries: z
@@ -34,7 +37,7 @@ export const MarketResearchOutput = z.object({
     .array(
       z.object({
         kind: z
-          .enum(INSIGHT_KINDS)
+          .enum(RESEARCH_KINDS)
           .describe(
             "pain=悩み / phrase=ユーザーがよく使う表現 / complaint=既存手段への不満 / desired_feature=求められている機能 / " +
               "unmet_need=満たされていないニーズ / trend=話題になっているテーマ / gap=まだ訴求されていない領域",

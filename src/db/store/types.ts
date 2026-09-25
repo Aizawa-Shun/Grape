@@ -87,7 +87,7 @@ export interface Defaults {
   growthGoals: "status" | "createdAt";
   productKnowledge: "brandVoice" | "editedByHuman" | "updatedAt";
   marketInsights: "userPhrases" | "sources" | "grounded" | "createdAt";
-  competitors: "url" | "xHandle" | "sources" | "verified" | "createdAt";
+  competitors: "url" | "xHandle" | "sources" | "verified" | "snapshot" | "snapshotAt" | "createdAt";
   icps: "createdAt";
   strategies: "runId" | "origin" | "createdAt";
   opportunities: "runId" | "postedAt" | "icpName" | "status" | "createdAt";
@@ -190,7 +190,7 @@ export function defaultsFor(name: CollectionName, now: Date): Record<string, unk
     case "marketInsights":
       return { userPhrases: [], sources: [], grounded: false, createdAt: now };
     case "competitors":
-      return { url: null, xHandle: null, sources: [], verified: false, createdAt: now };
+      return { url: null, xHandle: null, sources: [], verified: false, snapshot: null, snapshotAt: null, createdAt: now };
     case "icps":
       return { createdAt: now };
     case "strategies":

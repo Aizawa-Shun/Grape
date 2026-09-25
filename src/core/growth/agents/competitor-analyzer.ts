@@ -1,8 +1,9 @@
 import { z } from "zod";
 
-import type { SourceRef } from "@/db/schema";
+import type { CompetitorSnapshot, SourceRef } from "@/db/schema";
 
 import type { PublicPage } from "../sources/page";
+import { snapshotOf } from "../watch";
 import type { WebResearcher, WebResearchResult } from "../sources/web";
 import { cleanList, COMMON_RULES, groundedSources, renderSources, type AgentDeps } from "./shared";
 
@@ -74,6 +75,8 @@ export interface CompetitorFinding {
   differentiation: string;
   sources: SourceRef[];
   verified: boolean;
+  /** The homepage as read now: the watch step's baseline. */
+  snapshot: CompetitorSnapshot | null;
 }
 
 export interface CompetitorResult {
@@ -228,6 +231,7 @@ export async function runCompetitorAnalyzer(deps: CompetitorAnalyzerDeps): Promi
       differentiation: competitor.differentiation,
       sources,
       verified: Boolean(page),
+      snapshot: page ? snapshotOf(page) : null,
     };
   });
 

@@ -26,6 +26,7 @@ const LABELS: Record<GrowthStepKind, string> = {
   metrics: "投稿の数字を集めています",
   performance: "結果を分析しています",
   autopilot: "ルールの範囲で実行しています",
+  watch: "競合のサイトの変化を確認しています",
 };
 
 const DONE: Record<GrowthStepKind, string> = {
@@ -39,6 +40,7 @@ const DONE: Record<GrowthStepKind, string> = {
   metrics: "数字の取得",
   performance: "結果の分析",
   autopilot: "自動実行",
+  watch: "競合の動きの確認",
 };
 
 /** How long to wait before asking again when another request holds the step. */

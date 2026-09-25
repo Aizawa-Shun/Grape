@@ -7,6 +7,7 @@ import { attributePosts, eventsSince, GROWTH_UTM_CAMPAIGN, goalProgress, type Go
 import { latestInsights } from "./latest";
 import { getPolicy } from "./policy";
 import { activeRun } from "./runs";
+import { recentMoves } from "./watch";
 import { activeGoal, latestReport } from "./latest";
 
 /**
@@ -42,6 +43,8 @@ export interface GrowthDashboard {
   feed: Opportunity[];
   highIntentCount: number;
   contentIdeas: MarketInsight[];
+  /** Competitors' homepage changes of the last two weeks (watch.ts). */
+  moves: MarketInsight[];
   approvals: Post[];
   activity: AgentAction[];
   run: GrowthRun | null;
@@ -66,6 +69,7 @@ export async function loadGrowthDashboard(productId: string, conn: Database = db
   ]);
 
   const progress = goal ? await goalProgress(goal, conn, now) : null;
+  const moves = await recentMoves(productId, 14, conn, now);
 
   const published = posts.filter((p) => p.status === "published" && p.publishedAt && p.publishedAt >= weekAgo);
   const events = await eventsSince(productId, weekAgo, conn);
@@ -112,6 +116,7 @@ export async function loadGrowthDashboard(productId: string, conn: Database = db
     feed,
     highIntentCount,
     contentIdeas: insights.filter((i) => i.kind === "gap" || i.kind === "trend" || i.kind === "unmet_need").slice(0, 4),
+    moves,
     approvals,
     activity,
     run,

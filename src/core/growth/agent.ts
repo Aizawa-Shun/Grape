@@ -52,7 +52,10 @@ export async function planSteps(
   // step's re-weighting of it — that one is a week's results, not new research.
   const planned = firstBy(strategies.filter((s) => s.origin === "planner"), by((s) => s.createdAt, "desc"));
   const plannerAge = planned ? now.getTime() - planned.createdAt.getTime() : Infinity;
+  // A fresh competitor step re-reads every homepage anyway; otherwise the
+  // watch step compares them with what they said last time.
   if (plannerAge > RESEARCH_STALE_DAYS * DAY_MS) steps.push("market", "competitors", "icp", "strategy");
+  else steps.push("watch");
   steps.push("opportunities", "content");
   if (policy.approvalMode === "autonomous") steps.push("autopilot");
   return steps;

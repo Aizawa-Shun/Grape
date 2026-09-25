@@ -289,6 +289,7 @@ export const GROWTH_STEP_KINDS = [
   "metrics",
   "performance",
   "autopilot",
+  "watch",
 ] as const;
 export type GrowthStepKind = (typeof GROWTH_STEP_KINDS)[number];
 
@@ -399,6 +400,7 @@ export const INSIGHT_KINDS = [
   "unmet_need",
   "trend",
   "gap",
+  "competitor_move",
 ] as const;
 export type InsightKind = (typeof INSIGHT_KINDS)[number];
 
@@ -439,7 +441,21 @@ export interface Competitor {
   sources: SourceRef[];
   /** Its own homepage was fetched and read during this run. */
   verified: boolean;
+  /**
+   * What their homepage said when last read — compared daily by the watch
+   * step (core/growth/watch.ts) to notice when they change their pitch.
+   */
+  snapshot: CompetitorSnapshot | null;
+  snapshotAt: Date | null;
   createdAt: Date;
+}
+
+export interface CompetitorSnapshot {
+  title: string | null;
+  description: string | null;
+  headings: string[];
+  prices: string[];
+  ctas: string[];
 }
 
 export interface Icp {

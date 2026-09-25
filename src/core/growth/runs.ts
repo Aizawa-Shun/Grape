@@ -123,6 +123,7 @@ const STEP_LABELS: Record<GrowthStepKind, string> = {
   metrics: "投稿の数字の取得",
   performance: "結果の分析と戦略の調整",
   autopilot: "自動実行",
+  watch: "競合の動きの確認",
 };
 
 export function stepLabel(kind: GrowthStepKind): string {
