@@ -1,55 +1,28 @@
-import { createClient } from "@libsql/client";
-import { drizzle } from "drizzle-orm/libsql";
-import { migrate } from "drizzle-orm/libsql/migrator";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { registerFirstUser } from "@/core/auth/users";
 import type { Database } from "@/db/client";
-import * as schema from "@/db/schema";
+import { createMemoryStore } from "@/db/store/memory";
 
 import { assertProductOwner, assertTaskOwner, findOwnedProduct } from "./ownership";
 
-async function testDb(): Promise<Database> {
-  const db = drizzle(createClient({ url: ":memory:" }), { schema });
-  await migrate(db, { migrationsFolder: "./drizzle" });
-  return db as unknown as Database;
-}
-
 let db: Database;
-let alice: string;
-let bob: string;
+const alice = "alice";
+const bob = "bob";
 
 beforeEach(async () => {
-  db = await testDb();
+  db = createMemoryStore();
 
-  alice = (
-    await registerFirstUser(
-      { email: "alice@example.com", displayName: "Alice", password: "alice-long-password" },
-      db,
-    )
-  ).id;
+  await db.users.set(alice, { email: "alice@example.com", displayName: "Alice", role: "owner" });
+  await db.users.set(bob, { email: "bob@example.com", displayName: "Bob", role: "member" });
 
-  // Inserted directly: registration is closed after the first account, and
-  // this needs a second owner rather than an invitation flow.
-  const [second] = await db
-    .insert(schema.users)
-    .values({
-      email: "bob@example.com",
-      displayName: "Bob",
-      passwordHash: "no-password-login",
-      role: "member",
-    })
-    .returning();
-  bob = second.id;
-
-  await db.insert(schema.products).values({
+  await db.products.insert({
     id: "alice-product",
     userId: alice,
     url: "https://alice.example.com",
     name: "Alice's service",
   });
 
-  await db.insert(schema.tasks).values({
+  await db.tasks.insert({
     id: "alice-task",
     productId: "alice-product",
     title: "Write a post",

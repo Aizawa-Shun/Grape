@@ -1,41 +1,30 @@
-import { createClient } from "@libsql/client";
-import { drizzle } from "drizzle-orm/libsql";
-import { migrate } from "drizzle-orm/libsql/migrator";
 import { describe, expect, it } from "vitest";
 
 import type { Database } from "@/db/client";
-import * as schema from "@/db/schema";
+import { createMemoryStore } from "@/db/store/memory";
 
 import { loadNavProducts } from "./nav";
 
 async function testDb(): Promise<Database> {
-  const db = drizzle(createClient({ url: ":memory:" }), { schema });
-  await migrate(db, { migrationsFolder: "./drizzle" });
-  return db as unknown as Database;
+  return createMemoryStore();
 }
 
 async function seed(db: Database) {
-  await db.insert(schema.users).values([
-    { id: "alice", email: "a@example.com", displayName: "A", passwordHash: "x", role: "owner" },
-    { id: "bob", email: "b@example.com", displayName: "B", passwordHash: "x", role: "member" },
-  ]);
-  await db.insert(schema.products).values([
-    { id: "a1", userId: "alice", url: "https://a.example.com", name: "Alice's" },
-    { id: "b1", userId: "bob", url: "https://b.example.com", name: "Bob's" },
-  ]);
-  await db.insert(schema.tasks).values([
-    {
-      id: "b-task",
-      productId: "b1",
-      title: "Bob's open task",
-      rationale: "because",
-      stage: "reach",
-      expectedMetric: "sessions",
-      impact: 3,
-      effort: 1,
-      dueWeek: "2026-W37",
-    },
-  ]);
+  await db.users.set("alice", { email: "a@example.com", displayName: "A", role: "owner" });
+  await db.users.set("bob", { email: "b@example.com", displayName: "B", role: "member" });
+  await db.products.insert({ id: "a1", userId: "alice", url: "https://a.example.com", name: "Alice's" });
+  await db.products.insert({ id: "b1", userId: "bob", url: "https://b.example.com", name: "Bob's" });
+  await db.tasks.insert({
+    id: "b-task",
+    productId: "b1",
+    title: "Bob's open task",
+    rationale: "because",
+    stage: "reach",
+    expectedMetric: "sessions",
+    impact: 3,
+    effort: 1,
+    dueWeek: "2026-W37",
+  });
 }
 
 describe("loadNavProducts", () => {

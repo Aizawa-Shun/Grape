@@ -6,6 +6,14 @@ import { AppError, ERROR_CODES, toAppError } from "@/core/errors";
 import { LLMError } from "@/core/llm/types";
 
 import { catalogEntry, describeForUser } from "./errors";
+
+// The wrapper warms the settings cache before every handler, which reads the
+// settings collection — here the in-memory store, not a Firestore this test
+// has no business reaching.
+vi.mock("@/db/client", async () => {
+  const { createMemoryStore } = await import("@/db/store/memory");
+  return { db: createMemoryStore() };
+});
 import { REQUEST_ID_HEADER, route } from "./route";
 
 function silenceLogs() {

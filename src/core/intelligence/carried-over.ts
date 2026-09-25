@@ -1,8 +1,8 @@
-import { and, eq, inArray, isNull, ne, notExists, or } from "drizzle-orm";
+import { db, type Database } from "@/db/client";
+import type { Task } from "@/db/schema";
+import { by } from "@/db/sort";
 
-import { db, schema, type Database } from "@/db/client";
-
-export type Task = typeof schema.tasks.$inferSelect;
+export type { Task };
 
 /**
  * Work from earlier diagnoses that is not finished yet: still open, approved
@@ -15,34 +15,34 @@ export type Task = typeof schema.tasks.$inferSelect;
  * the home page could send the reader to a card that was no longer there.
  * Nothing is closed on the reader's behalf here either — it is only shown.
  *
- * Skipped and already-measured work is filtered in SQL rather than after the
- * fact: done tasks only accumulate, and each row returned costs the page three
- * more queries for its artifact, run and outcome.
+ * One read of the product's tasks and one of the outcomes for its done ones;
+ * the filtering is code. A product's task list is small, and this avoids both
+ * a composite index and a query per task.
  */
 export async function findCarriedOverTasks(
   productId: string,
   latestDiagnosisId: string | null,
   database: Database = db,
 ): Promise<Task[]> {
-  return database.query.tasks.findMany({
-    where: and(
-      eq(schema.tasks.productId, productId),
-      or(
-        inArray(schema.tasks.status, ["proposed", "approved"]),
-        and(
-          eq(schema.tasks.status, "done"),
-          notExists(
-            database
-              .select({ id: schema.outcomes.id })
-              .from(schema.outcomes)
-              .where(eq(schema.outcomes.taskId, schema.tasks.id)),
-          ),
+  const tasks = (await database.tasks.find({ where: [["productId", "==", productId]] })).filter(
+    (task) => latestDiagnosisId === null || task.diagnosisId !== latestDiagnosisId,
+  );
+
+  const done = tasks.filter((task) => task.status === "done");
+  const measured = new Set(
+    done.length === 0
+      ? []
+      : (await database.outcomes.find({ where: [["taskId", "in", done.map((task) => task.id)]] })).map(
+          (outcome) => outcome.taskId,
         ),
-      ),
-      latestDiagnosisId
-        ? or(isNull(schema.tasks.diagnosisId), ne(schema.tasks.diagnosisId, latestDiagnosisId))
-        : undefined,
-    ),
-    orderBy: (tasks, { desc }) => [desc(tasks.createdAt)],
-  });
+  );
+
+  return tasks
+    .filter(
+      (task) =>
+        task.status === "proposed" ||
+        task.status === "approved" ||
+        (task.status === "done" && !measured.has(task.id)),
+    )
+    .sort(by((task) => task.createdAt, "desc"));
 }

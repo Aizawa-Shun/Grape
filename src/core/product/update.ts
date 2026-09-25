@@ -1,11 +1,10 @@
-import { and, eq, ne } from "drizzle-orm";
-
 import { AppError } from "@/core/errors";
-import { db, schema, type Database } from "@/db/client";
+import { db, type Database } from "@/db/client";
+import type { Product } from "@/db/schema";
 
 import { normalizeProductUrl } from "./register";
 
-export type Product = typeof schema.products.$inferSelect;
+export type { Product };
 
 export interface ProductEdit {
   name?: string;
@@ -36,33 +35,19 @@ export async function updateProduct(
   edit: ProductEdit,
   database: Database = db,
 ): Promise<Product> {
-  const set: Partial<typeof schema.products.$inferInsert> = {};
+  const set: Partial<Omit<Product, "id">> = {};
   if (edit.name !== undefined) set.name = edit.name;
   if (edit.keyEventName !== undefined) set.keyEventName = edit.keyEventName;
 
+  let url: string | undefined;
   if (edit.url !== undefined) {
-    const url = normalizeProductUrl(edit.url);
-    if (!url) {
+    const normalized = normalizeProductUrl(edit.url);
+    if (!normalized) {
       throw new AppError("INVALID_INPUT", `Not a valid URL: ${edit.url}`, {
         hint: "URLの形式で入力してください。",
       });
     }
-    // (userId, url) is unique: one account cannot register a site twice.
-    // Asked first so the answer can say which way it collided, rather than
-    // surfacing as a bare constraint error from the driver.
-    const clash = await database.query.products.findFirst({
-      where: and(
-        eq(schema.products.userId, userId),
-        eq(schema.products.url, url),
-        ne(schema.products.id, productId),
-      ),
-      columns: { id: true },
-    });
-    if (clash) {
-      throw new AppError("CONFLICT", `Another product already uses ${url}`, {
-        hint: "そのURLは別のサービスとして登録済みです。",
-      });
-    }
+    url = normalized;
     set.url = url;
   }
 
@@ -70,11 +55,30 @@ export async function updateProduct(
     throw new AppError("INVALID_INPUT", "Nothing to update");
   }
 
-  const [updated] = await database
-    .update(schema.products)
-    .set(set)
-    .where(and(eq(schema.products.id, productId), eq(schema.products.userId, userId)))
-    .returning();
+  // The ownership check, the (userId, url) uniqueness check and the write
+  // share one transaction: Firestore has no unique index, so this is what
+  // stops two edits racing each other onto the same address.
+  const updated = await database.runTransaction(async (tx) => {
+    const current = await tx.products.get(productId);
+    if (!current || current.userId !== userId) return null;
+
+    if (url !== undefined) {
+      const clash = await tx.products.find({
+        where: [
+          ["userId", "==", userId],
+          ["url", "==", url],
+        ],
+      });
+      if (clash.some((product) => product.id !== productId)) {
+        throw new AppError("CONFLICT", `Another product already uses ${url}`, {
+          hint: "そのURLは別のサービスとして登録済みです。",
+        });
+      }
+    }
+
+    await tx.products.update(productId, set);
+    return { ...current, ...set };
+  });
 
   if (!updated) throw new AppError("NOT_FOUND", `No product ${productId} for this account`);
   return updated;

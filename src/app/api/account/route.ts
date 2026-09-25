@@ -14,7 +14,6 @@ export const runtime = "nodejs";
  */
 const PatchSchema = z.object({
   displayName: z.string().max(200),
-  email: z.string().max(320),
 });
 
 export const PATCH = route("account.update", async (request) => {
@@ -22,5 +21,5 @@ export const PATCH = route("account.update", async (request) => {
   const input = PatchSchema.parse(await request.json().catch(() => null));
 
   const user = await updateProfile(userId, input);
-  return NextResponse.json({ displayName: user.displayName, email: user.email });
+  return NextResponse.json({ displayName: user.displayName });
 });

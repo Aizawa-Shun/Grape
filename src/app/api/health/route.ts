@@ -2,10 +2,8 @@ import { NextResponse } from "next/server";
 
 import { AppError } from "@/core/errors";
 import { getProvider, llmAvailable, type ProviderHealth } from "@/core/llm";
-import { dbReady, sqlClient } from "@/db/client";
-import { describeMigrationStatus, migrationStatus, readJournal } from "@/db/migration-status";
+import { db } from "@/db/client";
 import { loadSettings } from "@/core/settings";
-import { env } from "@/env";
 import { currentUser } from "@/server/auth/current-user";
 
 export const runtime = "nodejs";
@@ -25,14 +23,12 @@ export async function GET(request: Request) {
   // re-reading the cookie here: two implementations of "who is this" is one
   // more than can be kept in agreement.
   if (!(await currentUser())) {
-    await dbReady;
     const { ok } = await checkDatabase();
     return NextResponse.json({ ok }, { status: ok ? 200 : 503 });
   }
 
   const wantsLlm = new URL(request.url).searchParams.get("llm") !== "0";
 
-  await dbReady;
   // The effective configuration, which is what someone debugging needs to see
   // — not what .env happens to say underneath an override.
   const settings = await loadSettings();
@@ -84,35 +80,28 @@ async function checkLlm(): Promise<ProviderHealth> {
 }
 
 /**
- * Counting tables was not a real check: a database three migrations behind has
- * plenty of tables and passes, then fails later as a confusing query error.
- * Comparing what has been applied against what this checkout ships catches it
- * at the point where the answer is still "run the migration".
+ * Can this server read Firestore with its own credentials? One document read
+ * — the settings collection, which every request reads anyway — so an
+ * uptime monitor calling this every minute costs next to nothing, and the
+ * failure it catches (a service account without Firestore access, a wrong
+ * project, the emulator not running) is the one that would otherwise surface
+ * as every page failing at once.
  */
-async function checkDatabase(): Promise<{
-  ok: boolean;
-  url: string;
-  detail: string;
-  foreignKeys?: boolean;
-}> {
+async function checkDatabase(): Promise<{ ok: boolean; project: string | null; detail: string }> {
+  const project =
+    process.env.FIREBASE_PROJECT_ID ??
+    process.env.GOOGLE_CLOUD_PROJECT ??
+    (process.env.FIREBASE_CONFIG ? (JSON.parse(process.env.FIREBASE_CONFIG).projectId ?? null) : null);
   try {
-    const status = await migrationStatus(sqlClient, await readJournal());
-    const fk = await sqlClient.execute("PRAGMA foreign_keys");
-    const foreignKeys = Number(Object.values(fk.rows[0] ?? {})[0] ?? 0) === 1;
-
+    await db.settings.find({ limit: 1 });
     return {
-      ok: status.ok && foreignKeys,
-      url: env.DATABASE_URL,
-      detail: foreignKeys
-        ? describeMigrationStatus(status)
-        : "foreign key enforcement is off — unknown products would be accepted by /api/collect",
-      foreignKeys,
+      ok: true,
+      project,
+      detail: process.env.FIRESTORE_EMULATOR_HOST
+        ? `Firestore emulator at ${process.env.FIRESTORE_EMULATOR_HOST}`
+        : "Firestore reachable",
     };
   } catch (error) {
-    return {
-      ok: false,
-      url: env.DATABASE_URL,
-      detail: error instanceof Error ? error.message : String(error),
-    };
+    return { ok: false, project, detail: error instanceof Error ? error.message : String(error) };
   }
 }

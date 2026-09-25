@@ -2,7 +2,6 @@ import "dotenv/config";
 
 import { runLoopTick } from "@/core/loop/tick";
 import { loadSettings } from "@/core/settings";
-import { dbReady } from "@/db/client";
 
 /**
  * `pnpm loop:tick` — one turn of the scheduled loop, by hand.
@@ -16,7 +15,6 @@ import { dbReady } from "@/db/client";
  * CommonJS and a top-level await fails with ERR_REQUIRE_ASYNC_MODULE.
  */
 async function main(): Promise<void> {
-  await dbReady;
   // Settings saved from /settings (LLM_PROVIDER, the monthly budget) live in
   // the database; without this the run would see .env alone.
   await loadSettings();

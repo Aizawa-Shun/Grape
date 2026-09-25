@@ -1,11 +1,9 @@
-import { createClient } from "@libsql/client";
-import { drizzle } from "drizzle-orm/libsql";
-import { migrate } from "drizzle-orm/libsql/migrator";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AppError } from "@/core/errors";
 import { resetSettingsCache, saveSettings } from "@/core/settings";
-import * as schema from "@/db/schema";
+import type { TaskStatus } from "@/db/schema";
+import { createMemoryStore } from "@/db/store/memory";
 import { currentUserId } from "@/server/context";
 
 import { runLoopTick } from "./tick";
@@ -15,20 +13,15 @@ const DAY = 24 * 60 * 60 * 1000;
 const daysAgo = (n: number) => new Date(NOW.getTime() - n * DAY);
 
 async function testDb() {
-  const db = drizzle(createClient({ url: ":memory:" }), { schema });
-  await migrate(db, { migrationsFolder: "./drizzle" });
-  return db;
+  return createMemoryStore();
 }
 
 type TestDb = Awaited<ReturnType<typeof testDb>>;
 
 async function product(db: TestDb, userId: string, url: string, lastDiagnosedDaysAgo: number | null) {
-  const [row] = await db
-    .insert(schema.products)
-    .values({ userId, url, name: url, setupStatus: "ready" })
-    .returning();
+  const row = await db.products.insert({ userId, url, name: url, setupStatus: "ready" });
   if (lastDiagnosedDaysAgo !== null) {
-    await db.insert(schema.diagnoses).values({
+    await db.diagnoses.insert({
       productId: row.id,
       contextVersion: 1,
       windowStart: daysAgo(lastDiagnosedDaysAgo + 7),
@@ -45,12 +38,10 @@ async function product(db: TestDb, userId: string, url: string, lastDiagnosedDay
 async function task(
   db: TestDb,
   productId: string,
-  status: (typeof schema.TASK_STATUSES)[number],
+  status: TaskStatus,
   completedDaysAgo: number | null,
 ) {
-  const [row] = await db
-    .insert(schema.tasks)
-    .values({
+  return db.tasks.insert({
       productId,
       title: `${status}-${completedDaysAgo}`,
       rationale: "r",
@@ -61,9 +52,7 @@ async function task(
       dueWeek: "2026-W39",
       status,
       completedAt: completedDaysAgo === null ? null : daysAgo(completedDaysAgo),
-    })
-    .returning();
-  return row;
+  });
 }
 
 afterEach(() => {
@@ -78,9 +67,14 @@ describe("runLoopTick — measuring", () => {
     await task(db, p.id, "done", 3); // too early
     await task(db, p.id, "approved", null); // practice run: never done
     const measuredAlready = await task(db, p.id, "done", 20);
-    await db
-      .insert(schema.outcomes)
-      .values({ taskId: measuredAlready.id, metric: "reach", before: 1, after: 2, windowDays: 7, delta: 1 });
+    await db.outcomes.insert({
+      taskId: measuredAlready.id,
+      metric: "reach",
+      before: 1,
+      after: 2,
+      windowDays: 7,
+      delta: 1,
+    });
 
     const measuredIds: string[] = [];
     const result = await runLoopTick({

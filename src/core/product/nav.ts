@@ -1,6 +1,5 @@
-import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
-
-import { db, schema, type Database } from "@/db/client";
+import { db, type Database } from "@/db/client";
+import { by } from "@/db/sort";
 
 /**
  * What the sidebar needs, and nothing else.
@@ -27,35 +26,30 @@ export interface NavProduct {
 export async function loadNavProducts(userId: string, database?: Database): Promise<NavProduct[]> {
   const conn = database ?? db;
 
-  const products = await conn.query.products.findMany({
-    columns: { id: true, name: true, url: true },
-    where: eq(schema.products.userId, userId),
-    orderBy: (products, { asc }) => [asc(products.createdAt)],
-  });
+  const products = (await conn.products.find({ where: [["userId", "==", userId]] })).sort(
+    by((product) => product.createdAt),
+  );
   if (products.length === 0) return [];
 
-  // One grouped query rather than one per product: the sidebar renders on
-  // every navigation, so its cost is paid constantly. Restricted to this
-  // account's products for the same reason — otherwise the scan grows with
-  // every other account's tasks, none of which can affect the answer.
-  const counts = await conn
-    .select({ productId: schema.tasks.productId, n: sql<number>`count(*)` })
-    .from(schema.tasks)
-    .where(
-      and(
-        inArray(
-          schema.tasks.productId,
-          products.map((product) => product.id),
-        ),
-        notInArray(schema.tasks.status, ["done", "skipped"]),
-      ),
-    )
-    .groupBy(schema.tasks.productId);
-
-  const byProduct = new Map(counts.map((row) => [row.productId, Number(row.n)]));
+  // One query across the account's products rather than one per product: the
+  // sidebar renders on every navigation, so its cost is paid constantly.
+  // Filtered to this account's products for the same reason — otherwise the
+  // scan would grow with every other account's tasks. The status filter is
+  // code, because Firestore allows only one `in` per query and it is spent on
+  // productId.
+  const tasks = await conn.tasks.find({
+    where: [["productId", "in", products.map((product) => product.id)]],
+  });
+  const byProduct = new Map<string, number>();
+  for (const task of tasks) {
+    if (task.status === "done" || task.status === "skipped") continue;
+    byProduct.set(task.productId, (byProduct.get(task.productId) ?? 0) + 1);
+  }
 
   return products.map((product) => ({
-    ...product,
+    id: product.id,
+    name: product.name,
+    url: product.url,
     openTasks: byProduct.get(product.id) ?? 0,
   }));
 }

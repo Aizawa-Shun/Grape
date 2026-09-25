@@ -1,52 +1,38 @@
-import { createClient } from "@libsql/client";
-import { drizzle } from "drizzle-orm/libsql";
-import { migrate } from "drizzle-orm/libsql/migrator";
 import { describe, expect, it } from "vitest";
 
-import * as schema from "@/db/schema";
+import type { TaskStatus } from "@/db/schema";
+import { createMemoryStore } from "@/db/store/memory";
 
 import { findCarriedOverTasks } from "./carried-over";
 
 async function testDb() {
-  const db = drizzle(createClient({ url: ":memory:" }), { schema });
-  await migrate(db, { migrationsFolder: "./drizzle" });
-  return db;
+  return createMemoryStore();
 }
 
 type TestDb = Awaited<ReturnType<typeof testDb>>;
 
 async function seed(db: TestDb) {
-  const [product] = await db
-    .insert(schema.products)
-    .values({ userId: "owner", url: "https://example.com/", name: "Example", setupStatus: "ready" })
-    .returning();
-  const diagnosis = async () =>
-    (
-      await db
-        .insert(schema.diagnoses)
-        .values({
-          productId: product.id,
-          contextVersion: 1,
-          windowStart: new Date(),
-          windowEnd: new Date(),
-          mode: "audit",
-          bottleneckStage: "reach",
-          summary: "s",
-        })
-        .returning()
-    )[0];
+  const product = await db.products.insert({
+    userId: "owner",
+    url: "https://example.com/",
+    name: "Example",
+    setupStatus: "ready",
+  });
+  const diagnosis = () =>
+    db.diagnoses.insert({
+      productId: product.id,
+      contextVersion: 1,
+      windowStart: new Date(),
+      windowEnd: new Date(),
+      mode: "audit",
+      bottleneckStage: "reach",
+      summary: "s",
+    });
   const older = await diagnosis();
   const latest = await diagnosis();
 
-  const task = async (
-    title: string,
-    diagnosisId: string,
-    status: (typeof schema.TASK_STATUSES)[number],
-  ) =>
-    (
-      await db
-        .insert(schema.tasks)
-        .values({
+  const task = (title: string, diagnosisId: string, status: TaskStatus) =>
+    db.tasks.insert({
           productId: product.id,
           diagnosisId,
           title,
@@ -57,10 +43,8 @@ async function seed(db: TestDb) {
           effort: 2,
           dueWeek: "2026-W39",
           status,
-          completedAt: status === "done" ? new Date() : null,
-        })
-        .returning()
-    )[0];
+      completedAt: status === "done" ? new Date() : null,
+    });
 
   return { product, older, latest, task };
 }
@@ -85,9 +69,7 @@ describe("findCarriedOverTasks", () => {
 
     await task("やめた", older.id, "skipped");
     const measured = await task("測定済み", older.id, "done");
-    await db
-      .insert(schema.outcomes)
-      .values({ taskId: measured.id, metric: "reach", before: 1, after: 2, windowDays: 7, delta: 1 });
+    await db.outcomes.insert({ taskId: measured.id, metric: "reach", before: 1, after: 2, windowDays: 7, delta: 1 });
 
     expect(await findCarriedOverTasks(product.id, latest.id, db)).toEqual([]);
   });

@@ -1,4 +1,3 @@
-import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { renderContextSnapshot } from "@/core/context/snapshot";
@@ -6,8 +5,9 @@ import { AppError, toAppError } from "@/core/errors";
 import { getFunnel, type FunnelResult } from "@/core/data/funnel";
 import { STAGE_UI } from "@/core/data/stages";
 import { getProvider, type LLMProvider } from "@/core/llm";
-import { db, schema, type Database } from "@/db/client";
-import type { FunnelStage } from "@/db/schema";
+import { getLatestContext } from "@/core/context/edit";
+import { db, type Database } from "@/db/client";
+import type { Diagnosis, DiagnosisMode, FunnelStage, Product, ProductContext } from "@/db/schema";
 
 import { runSiteAudit, type AuditFinding } from "./audit";
 import { getRecentOutcomes, type PastOutcome } from "./outcomes";
@@ -40,7 +40,7 @@ const DiagnosisNarrativeSchema = z.object({
     .describe("この説明の確信度。0〜1の小数。"),
 });
 
-export type Diagnosis = typeof schema.diagnoses.$inferSelect;
+export type { Diagnosis };
 
 const DIAGNOSE_SYSTEM_SUFFIX = `
 
@@ -55,7 +55,7 @@ const DIAGNOSE_SYSTEM_SUFFIX = `
    無かった施策と同じ方向性を「効くはずだ」と繰り返し主張しない。
 4. 出力は日本語で書く。`;
 
-function buildSystemPrompt(product: typeof schema.products.$inferSelect, context: typeof schema.productContexts.$inferSelect): string {
+function buildSystemPrompt(product: Product, context: ProductContext): string {
   return renderContextSnapshot(product, context) + DIAGNOSE_SYSTEM_SUFFIX;
 }
 
@@ -142,18 +142,15 @@ export async function diagnoseProduct(productId: string, options: DiagnoseOption
   const conn = options.database ?? db;
   const provider = options.provider ?? (await getProvider());
 
-  const product = await conn.query.products.findFirst({ where: eq(schema.products.id, productId) });
+  const product = await conn.products.get(productId);
   if (!product) throw new AppError("NOT_FOUND", `Unknown product: ${productId}`);
 
-  const context = await conn.query.productContexts.findFirst({
-    where: eq(schema.productContexts.productId, productId),
-    orderBy: (contexts, { desc }) => [desc(contexts.version)],
-  });
+  const context = await getLatestContext(productId, conn);
   if (!context) throw new AppError("CONFLICT", `Product ${productId} has no Product Context yet`);
 
-  const funnel = await getFunnel(productId, { windowDays: options.windowDays, now: options.now });
+  const funnel = await getFunnel(productId, { windowDays: options.windowDays, now: options.now, database: conn });
 
-  let mode: (typeof schema.DIAGNOSIS_MODES)[number];
+  let mode: DiagnosisMode;
   let bottleneckStage: FunnelStage;
   let userPrompt: string;
   let evidence: Record<string, unknown>;
@@ -164,7 +161,7 @@ export async function diagnoseProduct(productId: string, options: DiagnoseOption
   if (funnel.isColdStart) {
     mode = "audit";
     bottleneckStage = "reach";
-    const pages = await conn.query.crawlPages.findMany({ where: eq(schema.crawlPages.productId, productId) });
+    const pages = await conn.crawlPages.find({ where: [["productId", "==", productId]] });
     const findings = runSiteAudit(pages, context);
     userPrompt = renderAuditEvidence(findings) + pastOutcomesSection;
     evidence = { funnel: funnelEvidenceSummary(funnel), audit: findings, pastOutcomes };
@@ -204,23 +201,18 @@ export async function diagnoseProduct(productId: string, options: DiagnoseOption
     });
   }
 
-  const [row] = await conn
-    .insert(schema.diagnoses)
-    .values({
-      productId,
-      contextVersion: context.version,
-      windowStart: funnel.windowStart,
-      windowEnd: funnel.windowEnd,
-      mode,
-      bottleneckStage,
-      summary: value.summary,
-      evidence,
-      confidence: value.confidence,
-      model,
-    })
-    .returning();
-
-  return row;
+  return conn.diagnoses.insert({
+    productId,
+    contextVersion: context.version,
+    windowStart: funnel.windowStart,
+    windowEnd: funnel.windowEnd,
+    mode,
+    bottleneckStage,
+    summary: value.summary,
+    evidence,
+    confidence: value.confidence,
+    model,
+  });
 }
 
 /** What gets persisted as `diagnoses.evidence` for the funnel path — the raw FunnelResult minus fields that do not survive JSON (Dates become strings, Maps were never here). */

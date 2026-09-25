@@ -52,3 +52,9 @@ next-env.d.ts
 
 # database backups
 /backups
+
+# Firebase emulators
+firestore-debug.log
+firebase-debug.log
+ui-debug.log
+.firebase/

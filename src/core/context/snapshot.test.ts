@@ -1,15 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import type { productContexts, products } from "@/db/schema";
+import type { Product, ProductContext } from "@/db/schema";
 
 import { renderContextSnapshot } from "./snapshot";
 
-type Product = typeof products.$inferSelect;
-type ProductContext = typeof productContexts.$inferSelect;
-
 const product: Product = {
   id: "p1",
-  userId: "local",
+  userId: "owner",
   url: "https://example.com",
   name: "Widget",
   keyEventName: "signup",

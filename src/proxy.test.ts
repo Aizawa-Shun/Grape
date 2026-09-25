@@ -1,203 +1,61 @@
 import { NextRequest } from "next/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { proxy } from "./proxy";
-import { SESSION_COOKIE, issueSession, sessionSecret } from "./server/session";
+import { SESSION_COOKIE } from "./server/session";
 
-const SECRET = "configured-secret";
-
-function request(
-  path: string,
-  {
-    host = "localhost:3000",
-    cookie,
-    accept,
-  }: { host?: string; cookie?: string; accept?: string } = {},
-): NextRequest {
-  const headers = new Headers({ host });
+function request(path: string, { cookie }: { cookie?: string } = {}): NextRequest {
+  const headers = new Headers({ host: "grape.example.com" });
   if (cookie) headers.set("cookie", `${SESSION_COOKIE}=${cookie}`);
-  if (accept) headers.set("accept", accept);
-  return new NextRequest(`http://${host}${path}`, { headers });
+  return new NextRequest(`https://grape.example.com${path}`, { headers });
 }
 
-/** What the proxy did, reduced to the three outcomes that differ. */
-function outcome(response: Response) {
-  return {
-    status: response.status,
-    location: response.headers.get("location"),
-    setsSession: (response.headers.get("set-cookie") ?? "").includes(SESSION_COOKIE),
-  };
-}
-
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
-
+/**
+ * The proxy only checks that a session cookie is present — verification needs
+ * the Admin SDK, which does not run on the Edge, and happens in Node on every
+ * page and route (server/auth/current-user.ts). These tests hold it to that
+ * narrower job.
+ */
 describe("proxy", () => {
-  /**
-   * The tab icon is fetched by a browser that has no session yet — on the
-   * login page, and on every tab of a signed-out visitor. Behind the session
-   * these redirect to /login and the browser is handed HTML where it asked
-   * for an image.
-   */
   it.each(["/icon.png", "/apple-icon.png", "/icon1.png", "/icon.svg", "/favicon.ico"])(
     "serves %s without a session, so the tab icon renders signed out",
     async (path) => {
-      vi.stubEnv("GRAPE_SESSION_SECRET", SECRET);
-      vi.stubEnv("NODE_ENV", "production");
-
-      expect(outcome(await proxy(request(path, { host: "grape.example.com" }))).status).toBe(200);
+      expect((await proxy(request(path))).status).toBe(200);
     },
   );
 
   it("does not open a page merely because its name starts with icon", async () => {
-    vi.stubEnv("GRAPE_SESSION_SECRET", SECRET);
-    vi.stubEnv("NODE_ENV", "production");
-
-    expect(outcome(await proxy(request("/icons", { host: "grape.example.com" })))).toMatchObject({
-      status: 307,
-    });
+    expect((await proxy(request("/icons"))).status).toBe(307);
   });
 
-  it.each(["/api/collect", "/g.js", "/login", "/register", "/api/health", "/api/cron/tick"])(
+  it.each(["/api/collect", "/g.js", "/login", "/register", "/api/health", "/api/cron/tick", "/api/auth/session"])(
     "lets %s through with no session at all",
     async (path) => {
-      vi.stubEnv("GRAPE_SESSION_SECRET", "");
-      vi.stubEnv("NODE_ENV", "production");
-
-      expect(outcome(await proxy(request(path, { host: "grape.example.com" }))).status).toBe(200);
+      expect((await proxy(request(path))).status).toBe(200);
     },
   );
 
-  /**
-   * The deployment case with nothing configured. Closed rather than open:
-   * everything behind here reads the funnel and spends money.
-   */
-  it("refuses everything on a public host when no secret is configured", async () => {
-    vi.stubEnv("GRAPE_SESSION_SECRET", "");
-    vi.stubEnv("NODE_ENV", "production");
+  it("sends a signed-out browser to /login, remembering where it was going", async () => {
+    const response = await proxy(request("/products/abc?tab=1"));
 
-    expect(outcome(await proxy(request("/", { host: "grape.example.com" }))).status).toBe(503);
+    expect(response.status).toBe(307);
+    const location = new URL(response.headers.get("location")!);
+    expect(location.pathname).toBe("/login");
+    expect(location.searchParams.get("next")).toBe("/products/abc?tab=1");
   });
 
-  /**
-   * A browser cannot show a JSON body, and Next's router answers an
-   * unparseable navigation payload with its own "This page couldn't load" —
-   * which names nothing, and whose only button re-runs the same refusal. The
-   * one message an operator has to be able to read must arrive as a document.
-   */
-  it("tells a browser what to set, as HTML rather than JSON", async () => {
-    vi.stubEnv("GRAPE_SESSION_SECRET", "");
-    vi.stubEnv("NODE_ENV", "production");
+  it("answers a signed-out API call with a 401, not an HTML redirect", async () => {
+    const response = await proxy(request("/api/products"));
 
-    const response = await proxy(
-      request("/", { host: "grape.example.com", accept: "text/html,*/*" }),
-    );
-
-    expect(response.status).toBe(503);
-    expect(response.headers.get("content-type")).toContain("text/html");
-    expect(await response.text()).toContain("GRAPE_SESSION_SECRET");
-  });
-
-  it("still answers an API caller with JSON", async () => {
-    vi.stubEnv("GRAPE_SESSION_SECRET", "");
-    vi.stubEnv("NODE_ENV", "production");
-
-    const response = await proxy(
-      request("/api/products", { host: "grape.example.com", accept: "text/html,*/*" }),
-    );
-
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(401);
     expect(response.headers.get("content-type")).toContain("application/json");
   });
 
-  it("refuses even loopback in a production build, where the developer fallback does not apply", async () => {
-    vi.stubEnv("GRAPE_SESSION_SECRET", "");
-    vi.stubEnv("NODE_ENV", "production");
+  /** Presence only: whether the cookie is genuine is the Node side's question. */
+  it("passes a request carrying a session cookie on to be verified", async () => {
+    const response = await proxy(request("/", { cookie: "anything" }));
 
-    expect(outcome(await proxy(request("/"))).status).toBe(503);
-  });
-
-  /**
-   * What keeps `pnpm dev` working with an empty .env. It signs a real token
-   * rather than waving the request through, so the Node side has exactly one
-   * way to learn who is asking.
-   */
-  it("signs itself in as the developer on loopback in a non-production build", async () => {
-    vi.stubEnv("GRAPE_SESSION_SECRET", "");
-    vi.stubEnv("NODE_ENV", "development");
-
-    expect(outcome(await proxy(request("/")))).toMatchObject({ status: 200, setsSession: true });
-  });
-
-  it("does not extend the developer fallback past loopback", async () => {
-    vi.stubEnv("GRAPE_SESSION_SECRET", "");
-    vi.stubEnv("NODE_ENV", "development");
-
-    expect(outcome(await proxy(request("/", { host: "grape.example.com" }))).status).toBe(503);
-  });
-
-  /**
-   * Setting a secret is how a developer asks for real accounts; silently
-   * signing them in as somebody else would be a strange way to honour that.
-   */
-  it("asks for a login on loopback once a secret is configured", async () => {
-    vi.stubEnv("GRAPE_SESSION_SECRET", SECRET);
-    vi.stubEnv("NODE_ENV", "development");
-
-    expect(outcome(await proxy(request("/")))).toMatchObject({
-      status: 307,
-      setsSession: false,
-    });
-  });
-
-  it("sends an unauthenticated page to the login screen, remembering where it was headed", async () => {
-    vi.stubEnv("GRAPE_SESSION_SECRET", SECRET);
-    vi.stubEnv("NODE_ENV", "production");
-
-    const { status, location } = outcome(
-      await proxy(request("/products/abc", { host: "grape.example.com" })),
-    );
-    expect(status).toBe(307);
-    expect(location).toContain("/login?next=%2Fproducts%2Fabc");
-  });
-
-  it("answers an unauthenticated API call with 401 rather than a redirect", async () => {
-    vi.stubEnv("GRAPE_SESSION_SECRET", SECRET);
-    vi.stubEnv("NODE_ENV", "production");
-
-    expect(outcome(await proxy(request("/api/products", { host: "grape.example.com" })))).toMatchObject({
-      status: 401,
-      location: null,
-    });
-  });
-
-  it("lets a valid session through", async () => {
-    vi.stubEnv("GRAPE_SESSION_SECRET", SECRET);
-    vi.stubEnv("NODE_ENV", "production");
-    const token = await issueSession(SECRET, "user-1");
-
-    expect(outcome(await proxy(request("/", { host: "grape.example.com", cookie: token }))).status).toBe(200);
-  });
-
-  it("refuses a session signed with someone else's secret", async () => {
-    vi.stubEnv("GRAPE_SESSION_SECRET", SECRET);
-    vi.stubEnv("NODE_ENV", "production");
-    const token = await issueSession("a-different-secret", "user-1");
-
-    expect(outcome(await proxy(request("/", { host: "grape.example.com", cookie: token }))).status).toBe(307);
-  });
-
-  /**
-   * The developer key is not a secret and is compiled into every build, so it
-   * must never be what stands between a deployment and its data.
-   */
-  it("does not accept a token signed with the developer key on a public host", async () => {
-    vi.stubEnv("GRAPE_SESSION_SECRET", SECRET);
-    vi.stubEnv("NODE_ENV", "production");
-    const devKey = sessionSecret(undefined, true);
-    const token = await issueSession(devKey as string, "user-1");
-
-    expect(outcome(await proxy(request("/", { host: "grape.example.com", cookie: token }))).status).toBe(307);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-request-x-request-id")).toBeTruthy();
   });
 });

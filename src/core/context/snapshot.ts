@@ -1,7 +1,4 @@
-import type { productContexts, products } from "@/db/schema";
-
-type Product = typeof products.$inferSelect;
-type ProductContext = typeof productContexts.$inferSelect;
+import type { Product, ProductContext } from "@/db/schema";
 
 /**
  * Renders the Product Context into the stable prefix every downstream prompt

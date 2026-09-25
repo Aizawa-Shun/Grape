@@ -1,11 +1,8 @@
-import { createClient } from "@libsql/client";
-import { drizzle } from "drizzle-orm/libsql";
-import { migrate } from "drizzle-orm/libsql/migrator";
 import { describe, expect, it, vi } from "vitest";
 
 import { AppError } from "@/core/errors";
 import { EMPTY_USAGE, type LLMProvider } from "@/core/llm/types";
-import * as schema from "@/db/schema";
+import { createMemoryStore } from "@/db/store/memory";
 
 import { artifactKindFor, generateArtifact, metaLimits, truncateToLimit } from "./generate";
 
@@ -64,13 +61,14 @@ describe("metaLimits", () => {
 
 describe("generateArtifact", () => {
   async function setup(channel: "x" | "manual", primaryLanguage = "ja") {
-    const db = drizzle(createClient({ url: ":memory:" }), { schema });
-    await migrate(db, { migrationsFolder: "./drizzle" });
-    const [product] = await db
-      .insert(schema.products)
-      .values({ userId: "owner", url: "https://cheeeess.com/", name: "Cheeeess", setupStatus: "ready" })
-      .returning();
-    await db.insert(schema.productContexts).values({
+    const db = createMemoryStore();
+    const product = await db.products.insert({
+      userId: "owner",
+      url: "https://cheeeess.com/",
+      name: "Cheeeess",
+      setupStatus: "ready",
+    });
+    await db.productContexts.insert({
       productId: product.id,
       version: 1,
       what: "チェス",
@@ -80,9 +78,7 @@ describe("generateArtifact", () => {
       sourcePages: [],
       primaryLanguage,
     });
-    const [task] = await db
-      .insert(schema.tasks)
-      .values({
+    const task = await db.tasks.insert({
         productId: product.id,
         title: "検索結果の見え方を直す",
         rationale: "r",
@@ -92,8 +88,7 @@ describe("generateArtifact", () => {
         impact: 3,
         effort: 2,
         dueWeek: "2026-W39",
-      })
-      .returning();
+    });
     return { db, task };
   }
 

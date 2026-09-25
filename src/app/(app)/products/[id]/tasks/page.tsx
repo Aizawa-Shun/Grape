@@ -1,4 +1,3 @@
-import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 
 import { estimateActionCostUsd } from "@/core/action/channel";
@@ -6,7 +5,9 @@ import { Page, PageHeader } from "@/components/ui/page";
 import { findCarriedOverTasks } from "@/core/intelligence/carried-over";
 import { findOwnedProduct } from "@/core/product/ownership";
 import { loadSettings } from "@/core/settings";
-import { db, schema } from "@/db/client";
+import { db } from "@/db/client";
+import type { Task } from "@/db/schema";
+import { by, firstBy } from "@/db/sort";
 import { requireUser } from "@/server/auth/current-user";
 
 import { DiagnosisPanel } from "../diagnosis-panel";
@@ -32,39 +33,32 @@ export default async function TasksPage({ params }: { params: Promise<{ id: stri
   // must reflect that on the very next load, not just after a restart.
   const settings = await loadSettings();
 
-  const latestDiagnosis =
-    (await db.query.diagnoses.findFirst({
-      where: eq(schema.diagnoses.productId, id),
-      orderBy: (diagnoses, { desc }) => [desc(diagnoses.createdAt)],
-    })) ?? null;
+  const latestDiagnosis = firstBy(
+    await db.diagnoses.find({ where: [["productId", "==", id]] }),
+    by((diagnosis) => diagnosis.createdAt, "desc"),
+  );
 
   const tasksRaw = latestDiagnosis
-    ? await db.query.tasks.findMany({
-        where: eq(schema.tasks.diagnosisId, latestDiagnosis.id),
-        orderBy: (tasks, { desc }) => [desc(tasks.impact)],
-      })
+    ? (await db.tasks.find({ where: [["diagnosisId", "==", latestDiagnosis.id]] })).sort(
+        by((task) => task.impact, "desc"),
+      )
     : [];
 
-  // Each task's latest artifact (if generated) and latest action run (if
-  // approved) — fetched per task since a task list this small does not
-  // warrant a join, and keeping it as separate queries keeps each one legible.
-  const withExtras = async (task: (typeof tasksRaw)[number]) => {
-    const artifact =
-      (await db.query.artifacts.findFirst({
-        where: eq(schema.artifacts.taskId, task.id),
-        orderBy: (artifacts, { desc }) => [desc(artifacts.createdAt)],
-      })) ?? null;
-    const actionRun =
-      (await db.query.actionRuns.findFirst({
-        where: eq(schema.actionRuns.taskId, task.id),
-        orderBy: (actionRuns, { desc }) => [desc(actionRuns.createdAt)],
-      })) ?? null;
+  // Each task's latest artifact (if generated), latest action run (if
+  // approved) and latest outcome (if measured). Per task, because each card
+  // needs only its own newest one of each and a task list this small does not
+  // warrant fetching everything and grouping.
+  const newest = <T,>(rows: T[], at: (row: T) => Date): T | null => firstBy(rows, by(at, "desc"));
+  const withExtras = async (task: Task) => {
+    const [artifacts, actionRuns, outcomes] = await Promise.all([
+      db.artifacts.find({ where: [["taskId", "==", task.id]] }),
+      db.actionRuns.find({ where: [["taskId", "==", task.id]] }),
+      db.outcomes.find({ where: [["taskId", "==", task.id]] }),
+    ]);
+    const artifact = newest(artifacts, (row) => row.createdAt);
+    const actionRun = newest(actionRuns, (row) => row.createdAt);
+    const outcome = newest(outcomes, (row) => row.evaluatedAt);
     const costEstimateUsd = artifact ? estimateActionCostUsd(task.channel, artifact.content) : null;
-    const outcome =
-      (await db.query.outcomes.findFirst({
-        where: eq(schema.outcomes.taskId, task.id),
-        orderBy: (outcomes, { desc }) => [desc(outcomes.evaluatedAt)],
-      })) ?? null;
     return { ...task, artifact, actionRun, costEstimateUsd, outcome };
   };
 

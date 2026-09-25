@@ -1,38 +1,25 @@
-import { createClient } from "@libsql/client";
-import { drizzle } from "drizzle-orm/libsql";
-import { migrate } from "drizzle-orm/libsql/migrator";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { resetSettingsCache, saveSettings } from "@/core/settings";
 import { runInRequestScope } from "@/server/context";
-import * as schema from "@/db/schema";
+import { createMemoryStore } from "@/db/store/memory";
 
 import { assertWithinBudget, monthSpendUsd, recordCall, withBudgetGuard } from "./budget";
 import { EMPTY_USAGE, LLMError, type LLMProvider } from "./types";
 
 /**
- * A real, migrated in-memory database rather than a mock: the thing under
- * test is a SUM query plus a month-boundary WHERE clause, and a hand-rolled
- * fake of that would just be a second, unverified implementation of the same
- * arithmetic sitting next to the first.
+ * The in-memory store, which store/contract.test.ts holds to Firestore's
+ * behaviour for exactly the operations this leans on: a sum over a
+ * createdAt range, filtered by userId.
  */
 async function testDb() {
-  const client = createClient({ url: ":memory:" });
-  const db = drizzle(client, { schema });
-  await migrate(db, { migrationsFolder: "./drizzle" });
-  return db;
+  return createMemoryStore();
 }
 
 type TestDb = Awaited<ReturnType<typeof testDb>>;
 
-/** llm_calls.user_id is a real foreign key — a per-account test row needs an actual users row behind it. */
 async function makeUser(db: TestDb, id: string): Promise<void> {
-  await db.insert(schema.users).values({
-    id,
-    email: `${id}@example.com`,
-    displayName: id,
-    passwordHash: "unused-in-this-test",
-  });
+  await db.users.set(id, { email: `${id}@example.com`, displayName: id });
 }
 
 afterEach(() => {
@@ -45,7 +32,7 @@ describe("monthSpendUsd / recordCall", () => {
 
     // Insert directly with an explicit past timestamp, since recordCall
     // always stamps "now" and this test needs to control that value.
-    await db.insert(schema.llmCalls).values({
+    await db.llmCalls.insert({
       taskKind: "diagnose",
       provider: "anthropic",
       model: "claude-opus-5",

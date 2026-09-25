@@ -1,8 +1,7 @@
-import { eq } from "drizzle-orm";
-
 import { AppError } from "@/core/errors";
 import { currentSettings } from "@/core/settings";
-import { db, schema, type Database } from "@/db/client";
+import { db, type Database } from "@/db/client";
+import type { ActionRun, Task } from "@/db/schema";
 import { log } from "@/server/log";
 
 import { estimateActionCostUsd } from "./channel";
@@ -31,8 +30,7 @@ import { getChannel } from "./channels";
  * so dry-run does not apply to it; approving a manual task always finishes it.
  */
 
-export type ActionRun = typeof schema.actionRuns.$inferSelect;
-export type Task = typeof schema.tasks.$inferSelect;
+export type { ActionRun, Task };
 
 export interface ExecuteOptions {
   database?: Database;
@@ -45,14 +43,14 @@ export async function approveAndExecute(
 ): Promise<ActionRun> {
   const conn = options.database ?? db;
 
-  const task = await conn.query.tasks.findFirst({ where: eq(schema.tasks.id, taskId) });
+  const task = await conn.tasks.get(taskId);
   if (!task) throw new AppError("NOT_FOUND", `Unknown task: ${taskId}`);
   // Guards against a double click re-sending an already-sent post — on the x
   // channel that would be a second real, billed, public post, not a no-op.
   if (task.status === "done") throw new AppError("CONFLICT", `Task ${taskId} is already done`);
   if (task.status === "skipped") throw new AppError("CONFLICT", `Task ${taskId} was skipped`);
 
-  const artifact = await conn.query.artifacts.findFirst({ where: eq(schema.artifacts.id, artifactId) });
+  const artifact = await conn.artifacts.get(artifactId);
   if (!artifact || artifact.taskId !== taskId) {
     throw new AppError("INVALID_INPUT", `Artifact ${artifactId} does not belong to task ${taskId}`);
   }
@@ -64,18 +62,15 @@ export async function approveAndExecute(
   const costEstimateUsd = estimateActionCostUsd(task.channel, artifact.content);
   const approvedAt = new Date();
 
-  const [run] = await conn
-    .insert(schema.actionRuns)
-    .values({
-      taskId,
-      artifactId,
-      channel: task.channel,
-      payload: { content: artifact.content },
-      status: "pending",
-      costEstimateUsd,
-      approvedAt,
-    })
-    .returning();
+  const run = await conn.actionRuns.insert({
+    taskId,
+    artifactId,
+    channel: task.channel,
+    payload: { content: artifact.content },
+    status: "pending",
+    costEstimateUsd,
+    approvedAt,
+  });
 
   const dryRun = task.channel !== "manual" && currentSettings().GRAPE_ACTION_DRY_RUN;
 
@@ -110,10 +105,11 @@ export async function approveAndExecute(
   } catch (error) {
     // Deliberately does not touch task.status: a failed send is retryable —
     // generate a fresh approval, or the same artifact again — not a dead end.
-    await conn
-      .update(schema.actionRuns)
-      .set({ status: "failed", executedAt: new Date(), response: { error: describeError(error) } })
-      .where(eq(schema.actionRuns.id, run.id));
+    await conn.actionRuns.update(run.id, {
+      status: "failed",
+      executedAt: new Date(),
+      response: { error: describeError(error) },
+    });
     throw error;
   }
 }
@@ -127,29 +123,20 @@ async function finish(
   taskStatus: "done" | "approved",
 ): Promise<ActionRun> {
   const executedAt = new Date();
-  const [updated] = await conn
-    .update(schema.actionRuns)
-    .set({ ...fields, executedAt })
-    .where(eq(schema.actionRuns.id, runId))
-    .returning();
-  await conn
-    .update(schema.tasks)
-    .set(
-      taskStatus === "done"
-        ? { status: "done", completedAt: executedAt }
-        : { status: "approved", completedAt: null },
-    )
-    .where(eq(schema.tasks.id, taskId));
+  const updated = await conn.actionRuns.update(runId, { ...fields, executedAt });
+  await conn.tasks.update(
+    taskId,
+    taskStatus === "done"
+      ? { status: "done", completedAt: executedAt }
+      : { status: "approved", completedAt: null },
+  );
+  if (!updated) throw new AppError("NOT_FOUND", `Action run ${runId} vanished while executing`);
   return updated;
 }
 
 export async function skipTask(taskId: string, options: ExecuteOptions = {}): Promise<Task> {
   const conn = options.database ?? db;
-  const [row] = await conn
-    .update(schema.tasks)
-    .set({ status: "skipped" })
-    .where(eq(schema.tasks.id, taskId))
-    .returning();
+  const row = await conn.tasks.update(taskId, { status: "skipped" });
   if (!row) throw new AppError("NOT_FOUND", `Unknown task: ${taskId}`);
   return row;
 }

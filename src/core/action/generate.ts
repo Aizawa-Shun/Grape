@@ -1,11 +1,11 @@
-import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { renderContextSnapshot } from "@/core/context/snapshot";
 import { AppError } from "@/core/errors";
 import { getProvider, type LLMProvider } from "@/core/llm";
-import { db, schema, type Database } from "@/db/client";
-import type { ArtifactKind, Channel } from "@/db/schema";
+import { getContextVersion, getLatestContext } from "@/core/context/edit";
+import { db, type Database } from "@/db/client";
+import type { Artifact, ArtifactKind, Channel, Task } from "@/db/schema";
 
 import { X_POST_MAX_CHARS } from "./channels/x";
 import { CHANNEL_ARTIFACT_KINDS } from "./kinds";
@@ -20,8 +20,7 @@ export { CHANNEL_ARTIFACT_KINDS } from "./kinds";
  * artifact is published where the product's own audience reads it.
  */
 
-export type Task = typeof schema.tasks.$inferSelect;
-export type Artifact = typeof schema.artifacts.$inferSelect;
+export type { Artifact, Task };
 
 const ArtifactContentSchema = z.object({
   content: z.string().min(1).describe("生成する文章の本文のみ。前置きや説明文は含めない。"),
@@ -205,30 +204,22 @@ export async function generateArtifact(taskId: string, options: GenerateOptions 
   const conn = options.database ?? db;
   const provider = options.provider ?? (await getProvider());
 
-  const task = await conn.query.tasks.findFirst({ where: eq(schema.tasks.id, taskId) });
+  const task = await conn.tasks.get(taskId);
   if (!task) throw new AppError("NOT_FOUND", `Unknown task: ${taskId}`);
 
-  const product = await conn.query.products.findFirst({ where: eq(schema.products.id, task.productId) });
+  const product = await conn.products.get(task.productId);
   if (!product) throw new AppError("NOT_FOUND", `Unknown product: ${task.productId}`);
 
   // Generate against the same Context version the task's diagnosis reasoned
   // over (falling back to latest if the task predates any diagnosis, or the
   // diagnosis was since deleted — diagnosisId is ON DELETE SET NULL).
   const diagnosis = task.diagnosisId
-    ? await conn.query.diagnoses.findFirst({ where: eq(schema.diagnoses.id, task.diagnosisId) })
+    ? await conn.diagnoses.get(task.diagnosisId)
     : undefined;
 
   const context = diagnosis
-    ? await conn.query.productContexts.findFirst({
-        where: and(
-          eq(schema.productContexts.productId, task.productId),
-          eq(schema.productContexts.version, diagnosis.contextVersion),
-        ),
-      })
-    : await conn.query.productContexts.findFirst({
-        where: eq(schema.productContexts.productId, task.productId),
-        orderBy: (contexts, { desc }) => [desc(contexts.version)],
-      });
+    ? await getContextVersion(task.productId, diagnosis.contextVersion, conn)
+    : await getLatestContext(task.productId, conn);
 
   if (!context) throw new AppError("CONFLICT", `Product ${task.productId} has no Product Context yet`);
 
@@ -241,6 +232,5 @@ export async function generateArtifact(taskId: string, options: GenerateOptions 
   const user = buildTaskPrompt(task);
 
   const content = await writeContent(provider, kind, system, user, primaryLanguage);
-  const [row] = await conn.insert(schema.artifacts).values({ taskId, kind, content }).returning();
-  return row;
+  return conn.artifacts.insert({ taskId, kind, content });
 }

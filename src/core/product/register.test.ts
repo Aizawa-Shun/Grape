@@ -1,10 +1,6 @@
-import { createClient } from "@libsql/client";
-import { eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/libsql";
-import { migrate } from "drizzle-orm/libsql/migrator";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import * as schema from "@/db/schema";
+import type { Store } from "@/db/store/types";
 
 /**
  * registerProduct writes through the shared `db` from `@/db/client`, so an
@@ -13,13 +9,12 @@ import * as schema from "@/db/schema";
  * core/context/crawl and core/context/extract are mocked below and cannot be
  * threaded through any other way.
  */
-const db = drizzle(createClient({ url: ":memory:" }), { schema });
+let db: Store;
 
 vi.mock("@/db/client", () => ({
   get db() {
     return db;
   },
-  schema,
 }));
 
 const crawlSite = vi.fn();
@@ -49,23 +44,12 @@ vi.mock("@/core/llm", () => ({ getProvider: () => ({}), llmAvailable: () => llmA
 let userId: string;
 
 beforeEach(async () => {
-  await migrate(db, { migrationsFolder: "./drizzle" });
-  await db.delete(schema.productContexts);
-  await db.delete(schema.crawlPages);
-  await db.delete(schema.products);
-  await db.delete(schema.users);
-
-  // Dynamic import, like the calls to registerProduct below: a static import
-  // at module scope resolves @/core/auth/users (and its own @/db/client
-  // import) before the `const db` above finishes initializing, and the mocked
-  // getter then reads it mid-TDZ.
-  const { registerFirstUser } = await import("@/core/auth/users");
-  userId = (
-    await registerFirstUser(
-      { email: "owner@example.com", displayName: "Owner", password: "a-long-enough-password" },
-      db,
-    )
-  ).id;
+  // A fresh store per test; created through a dynamic import for the same
+  // reason as the module under test below — see the comment on `db`.
+  const { createMemoryStore } = await import("@/db/store/memory");
+  db = createMemoryStore();
+  userId = "owner";
+  await db.users.set(userId, { email: "owner@example.com", displayName: "Owner", role: "owner" });
 
   crawlSite.mockReset();
   extractProductContext.mockReset();
@@ -140,7 +124,7 @@ describe("startProductSetup", () => {
     const started = await startProductSetup({ url: "https://example.com", userId });
 
     expect(crawlSite).not.toHaveBeenCalled();
-    const [row] = await db.query.products.findMany();
+    const [row] = await db.products.find();
     expect(row.id).toBe(started.productId);
     expect(row.setupStatus).toBe("pending");
   });
@@ -149,13 +133,13 @@ describe("startProductSetup", () => {
   it("puts an already-failed product back to pending when it is registered again", async () => {
     crawlSite.mockRejectedValue(new Error("DNS lookup failed"));
     const first = await register("https://example.com");
-    expect((await db.query.products.findFirst())?.setupStatus).toBe("failed");
+    expect((await db.products.first())?.setupStatus).toBe("failed");
 
     const { startProductSetup } = await import("./register");
     const again = await startProductSetup({ url: "https://example.com", userId });
 
     expect(again.productId).toBe(first.productId);
-    const row = await db.query.products.findFirst();
+    const row = await db.products.first();
     expect(row?.setupStatus).toBe("pending");
     expect(row?.setupError).toBeNull();
   });
@@ -168,10 +152,8 @@ describe("runProductSetup", () => {
 
     const { productId } = await register("https://example.com");
 
-    expect((await db.query.products.findFirst())?.setupStatus).toBe("ready");
-    const context = await db.query.productContexts.findFirst({
-      where: eq(schema.productContexts.productId, productId),
-    });
+    expect((await db.products.first())?.setupStatus).toBe("ready");
+    const context = await db.productContexts.first({ where: [["productId", "==", productId]] });
     expect(context?.what).toBe("分析されたwhat");
   });
 
@@ -184,7 +166,7 @@ describe("runProductSetup", () => {
 
     await expect(register("https://nope.example.com")).resolves.toBeDefined();
 
-    const row = await db.query.products.findFirst();
+    const row = await db.products.first();
     expect(row?.setupStatus).toBe("failed");
     expect(row?.setupError).toBeTruthy();
   });
@@ -195,9 +177,7 @@ describe("runProductSetup", () => {
 
     const { productId } = await register("https://example.com");
 
-    const context = await db.query.productContexts.findFirst({
-      where: eq(schema.productContexts.productId, productId),
-    });
+    const context = await db.productContexts.first({ where: [["productId", "==", productId]] });
     expect(context?.analysis?.overview.oneLiner).toBe("一言");
     // The four fields stay authoritative for every prompt downstream, derived
     // from the analysis rather than asked for separately.
@@ -216,10 +196,8 @@ describe("runProductSetup", () => {
 
     const { productId } = await register("https://example.com");
 
-    expect((await db.query.products.findFirst())?.setupStatus).toBe("ready");
-    const context = await db.query.productContexts.findFirst({
-      where: eq(schema.productContexts.productId, productId),
-    });
+    expect((await db.products.first())?.setupStatus).toBe("ready");
+    const context = await db.productContexts.first({ where: [["productId", "==", productId]] });
     expect(context?.what).toBe("what");
     expect(context?.analysis).toBeNull();
   });
@@ -232,7 +210,7 @@ describe("runProductSetup", () => {
     await register("https://example.com");
 
     expect(analyzeSaas).not.toHaveBeenCalled();
-    expect((await db.query.products.findFirst())?.setupStatus).toBe("ready");
+    expect((await db.products.first())?.setupStatus).toBe("ready");
   });
 
   /**
@@ -245,7 +223,7 @@ describe("runProductSetup", () => {
 
     await register("https://nope.example.com");
 
-    expect(await db.query.products.findMany()).toHaveLength(1);
+    expect(await db.products.find()).toHaveLength(1);
   });
 
   /**
@@ -261,14 +239,12 @@ describe("runProductSetup", () => {
     crawlSite.mockRejectedValue(new Error("timed out"));
     await register("https://example.com");
 
-    const rows = await db.query.products.findMany();
+    const rows = await db.products.find();
     expect(rows).toHaveLength(1);
     expect(rows[0]?.id).toBe(first.productId);
     expect(rows[0]?.setupStatus).toBe("failed");
 
-    const context = await db.query.productContexts.findFirst({
-      where: eq(schema.productContexts.productId, first.productId),
-    });
+    const context = await db.productContexts.first({ where: [["productId", "==", first.productId]] });
     expect(context?.what).toBe("分析されたwhat");
   });
 });
@@ -282,7 +258,7 @@ describe("runProductSetup naming", () => {
 
     await register("https://example.com/");
 
-    expect((await db.query.products.findFirst())?.name).toBe("Cheeeess");
+    expect((await db.products.first())?.name).toBe("Cheeeess");
   });
 
   /** A re-read must not undo a name chosen on the review screen. */
@@ -294,10 +270,10 @@ describe("runProductSetup naming", () => {
 
     const { runProductSetup, startProductSetup } = await import("./register");
     const started = await startProductSetup({ url: "https://example.com/", userId });
-    await db.update(schema.products).set({ name: "私のチェス" }).where(eq(schema.products.id, started.productId));
+    await db.products.update(started.productId, { name: "私のチェス" });
     await runProductSetup(started);
 
-    expect((await db.query.products.findFirst())?.name).toBe("私のチェス");
+    expect((await db.products.first())?.name).toBe("私のチェス");
   });
 });
 

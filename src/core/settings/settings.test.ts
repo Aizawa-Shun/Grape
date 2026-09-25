@@ -10,12 +10,12 @@ describe("OVERRIDABLE_KEYS", () => {
     // users.openaiApiKey (core/auth/users.ts), reached through /account, not
     // through this settings layer.
     for (const secret of [
-      "GRAPE_SESSION_SECRET",
+      "GRAPE_ENCRYPTION_KEY",
+      "GRAPE_CRON_SECRET",
       "X_CONSUMER_KEY",
       "X_CONSUMER_SECRET",
       "X_ACCESS_TOKEN",
       "X_ACCESS_TOKEN_SECRET",
-      "DATABASE_URL",
     ]) {
       expect(isOverridable(secret), secret).toBe(false);
     }
@@ -79,11 +79,11 @@ describe("resolveSettings", () => {
 
   it("ignores a key that is not overridable, even if one is stored", () => {
     const settings = resolveSettings(
-      { GRAPE_SESSION_SECRET: "from-env" },
-      { GRAPE_SESSION_SECRET: "from-db" } as never,
+      { GRAPE_ENCRYPTION_KEY: "from-env-long-enough" },
+      { GRAPE_ENCRYPTION_KEY: "from-db-long-enough" } as never,
     );
 
-    expect(settings.GRAPE_SESSION_SECRET).toBe("from-env");
+    expect(settings.GRAPE_ENCRYPTION_KEY).toBe("from-env-long-enough");
   });
 
   it("lets a stored value flip the dry-run flag, same as any other overridable key", () => {
@@ -104,16 +104,15 @@ describe("publicSettings", () => {
     // parseEnv before this function ever saw it.
     const settings = resolveSettings(
       {
-        GRAPE_SESSION_SECRET: "signing-key",
+        GRAPE_ENCRYPTION_KEY: "signing-key-long-enough",
         X_CONSUMER_SECRET: "x-secret",
-        DATABASE_URL: "file:./grape.db",
       },
       {},
     );
 
     const serialized = JSON.stringify(publicSettings(settings));
 
-    for (const secret of ["signing-key", "x-secret"]) {
+    for (const secret of ["signing-key-long-enough", "x-secret"]) {
       expect(serialized, secret).not.toContain(secret);
     }
   });

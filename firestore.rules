@@ -1,0 +1,14 @@
+rules_version = '2';
+
+// Every read and write goes through the Next.js server, which uses the Admin
+// SDK and is not subject to these rules. Nothing should ever reach Firestore
+// from a browser directly — the client SDK is used for Authentication only —
+// so the rules deny everything. If this ever blocks something, the fix is a
+// server route, not a looser rule.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

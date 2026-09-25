@@ -8,6 +8,7 @@ import {
   type OverridableKey,
 } from "@/core/settings";
 import { db } from "@/db/client";
+import { by } from "@/db/sort";
 import { env } from "@/env";
 import { requireUser } from "@/server/auth/current-user";
 
@@ -25,7 +26,7 @@ export const dynamic = "force-dynamic";
  * anything for one product. Below: everything Grape does regardless of which
  * service you are looking at.
  *
- * The values below are stored in the database rather than in .env, because a
+ * The values below are stored in Firestore rather than in the environment, because a
  * settings screen that wrote to that file would have shown a save and changed
  * nothing until the next restart. What stays in .env is listed at the bottom
  * and is deliberately not editable here.
@@ -38,10 +39,9 @@ export default async function SettingsPage({
   const { product: requested } = await searchParams;
 
   const user = await requireUser();
-  const products = await db.query.products.findMany({
-    where: (products, { eq }) => eq(products.userId, user.id),
-    orderBy: (products, { asc }) => [asc(products.createdAt)],
-  });
+  const products = (await db.products.find({ where: [["userId", "==", user.id]] })).sort(
+    by((product) => product.createdAt),
+  );
   const product =
     (requested ? products.find((p) => p.id === requested) : undefined) ?? products[0] ?? null;
 
@@ -59,7 +59,8 @@ export default async function SettingsPage({
   // secrets that genuinely are instance-wide.
   const configuredKeys = [
     { label: "Xの認証情報", set: Boolean(env.X_CONSUMER_KEY && env.X_ACCESS_TOKEN) },
-    { label: "セッション鍵", set: Boolean(env.GRAPE_SESSION_SECRET) },
+    { label: "APIキーの暗号化鍵", set: Boolean(env.GRAPE_ENCRYPTION_KEY) },
+    { label: "定期実行の鍵", set: Boolean(env.GRAPE_CRON_SECRET) },
   ];
 
   return (
@@ -110,8 +111,8 @@ export default async function SettingsPage({
         title="ここでは変えられないもの"
         description={
           <>
-            ここに残っている鍵は<code className="font-mono">.env</code>
-            を直接編集して、サーバーを再起動してください。練習モードだけは下で切り替えられます
+            ここに残っている鍵は、App Hosting では Secret Manager（<code className="font-mono">apphosting.yaml</code>）、
+            ローカルでは <code className="font-mono">.env</code> で設定し、デプロイし直すか再起動してください。練習モードだけは下で切り替えられます
             — オフにする前に確認が出ます。AIのAPIキーは各自のものなので、<code className="font-mono">/account</code>
             で設定します。
           </>

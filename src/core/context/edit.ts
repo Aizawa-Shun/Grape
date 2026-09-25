@@ -1,7 +1,7 @@
-import { eq } from "drizzle-orm";
-
 import { AppError } from "@/core/errors";
-import { db, schema } from "@/db/client";
+import { db, type Database } from "@/db/client";
+import type { ProductContext } from "@/db/schema";
+import { by, firstBy } from "@/db/sort";
 
 /**
  * A human correction becomes a new context version rather than an overwrite.
@@ -20,20 +20,45 @@ export interface ContextEditInput {
   how: string;
 }
 
-export async function saveEditedContext(productId: string, edits: ContextEditInput): Promise<{ version: number }> {
-  const current = await db.query.productContexts.findMany({
-    where: eq(schema.productContexts.productId, productId),
-    columns: { version: true, sourcePages: true, primaryLanguage: true },
-  });
+/** Every version of a product's context, newest first. */
+export async function contextVersions(productId: string, database: Database = db): Promise<ProductContext[]> {
+  const rows = await database.productContexts.find({ where: [["productId", "==", productId]] });
+  return rows.sort(by((row) => row.version, "desc"));
+}
 
-  if (current.length === 0) {
+export async function getLatestContext(productId: string, database: Database = db): Promise<ProductContext | null> {
+  return firstBy(
+    await database.productContexts.find({ where: [["productId", "==", productId]] }),
+    by((row) => row.version, "desc"),
+  );
+}
+
+/** The one version a diagnosis reasoned over. */
+export async function getContextVersion(
+  productId: string,
+  version: number,
+  database: Database = db,
+): Promise<ProductContext | null> {
+  return database.productContexts.first({
+    where: [
+      ["productId", "==", productId],
+      ["version", "==", version],
+    ],
+  });
+}
+
+export async function saveEditedContext(
+  productId: string,
+  edits: ContextEditInput,
+  database: Database = db,
+): Promise<{ version: number }> {
+  const latest = await getLatestContext(productId, database);
+  if (!latest) {
     throw new AppError("NOT_FOUND", `Product ${productId} has no context to edit yet`);
   }
 
-  const latest = current.reduce((max, row) => (row.version > max.version ? row : max));
   const version = latest.version + 1;
-
-  await db.insert(schema.productContexts).values({
+  await database.productContexts.insert({
     productId,
     version,
     what: edits.what,
@@ -50,12 +75,4 @@ export async function saveEditedContext(productId: string, edits: ContextEditInp
   });
 
   return { version };
-}
-
-export async function getLatestContext(productId: string) {
-  const rows = await db.query.productContexts.findMany({
-    where: eq(schema.productContexts.productId, productId),
-  });
-  if (rows.length === 0) return null;
-  return rows.reduce((max, row) => (row.version > max.version ? row : max));
 }

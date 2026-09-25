@@ -1,7 +1,5 @@
-import { eq } from "drizzle-orm";
-
 import { AppError } from "@/core/errors";
-import { db, schema, type Database } from "@/db/client";
+import { db, type Database } from "@/db/client";
 import { env, parseEnv, type Env } from "@/env";
 
 /**
@@ -25,7 +23,7 @@ import { env, parseEnv, type Env } from "@/env";
  *
  * - Secrets (API keys, the admin password, the X credentials) stay in .env so
  *   that an auth bypass on a tunnel-exposed instance cannot read or rewrite
- *   them, and so they never sit in a database file that gets backed up.
+ *   them, and so they never sit in a database that gets exported or backed up.
  * - DATABASE_URL cannot be here: it is what this table is read from.
  *
  * GRAPE_ACTION_DRY_RUN *is* here, as the one deliberate exception to "settings
@@ -103,11 +101,11 @@ export async function loadSettings(database?: Database): Promise<Env> {
 
 export async function reloadSettings(database?: Database): Promise<Env> {
   const conn = database ?? db;
-  const rows = await conn.select().from(schema.settings);
+  const rows = await conn.settings.find();
 
   const overrides: Partial<Record<OverridableKey, string>> = {};
   for (const row of rows) {
-    if (isOverridable(row.key)) overrides[row.key] = row.value;
+    if (isOverridable(row.id)) overrides[row.id] = row.value;
   }
 
   try {
@@ -183,13 +181,10 @@ export async function saveSettings(
   for (const key of OVERRIDABLE_KEYS) {
     const value = next[key];
     if (value === undefined) {
-      await conn.delete(schema.settings).where(eq(schema.settings.key, key));
+      await conn.settings.delete(key);
       continue;
     }
-    await conn
-      .insert(schema.settings)
-      .values({ key, value, updatedAt: now })
-      .onConflictDoUpdate({ target: schema.settings.key, set: { value, updatedAt: now } });
+    await conn.settings.set(key, { value, updatedAt: now });
   }
 
   cache = resolved;

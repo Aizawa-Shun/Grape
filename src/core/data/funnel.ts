@@ -1,8 +1,6 @@
-import { and, eq, gte, lte } from "drizzle-orm";
-
 import { AppError } from "@/core/errors";
 import { currentSettings } from "@/core/settings";
-import { db, schema } from "@/db/client";
+import { db, type Database } from "@/db/client";
 
 /**
  * Turns the raw event stream into the 5-stage funnel (spec's Reach / Visit /
@@ -246,6 +244,7 @@ export interface GetFunnelOptions {
   windowDays?: number;
   /** Injectable for tests; defaults to the real clock. */
   now?: Date;
+  database?: Database;
 }
 
 export async function getFunnel(productId: string, options: GetFunnelOptions = {}): Promise<FunnelResult> {
@@ -253,7 +252,7 @@ export async function getFunnel(productId: string, options: GetFunnelOptions = {
   const windowDays = options.windowDays ?? 30;
   const windowEnd = now;
   const windowStart = new Date(now.getTime() - windowDays * 24 * 60 * 60 * 1000);
-  return getFunnelForRange(productId, windowStart, windowEnd);
+  return getFunnelForRange(productId, windowStart, windowEnd, options.database);
 }
 
 /**
@@ -266,19 +265,22 @@ export async function getFunnelForRange(
   productId: string,
   windowStart: Date,
   windowEnd: Date,
+  database: Database = db,
 ): Promise<FunnelResult> {
   const lookbackStart = new Date(windowStart.getTime() - RETAIN_LOOKBACK_MS);
 
-  const product = await db.query.products.findFirst({ where: eq(schema.products.id, productId) });
+  const product = await database.products.get(productId);
   if (!product) throw new AppError("NOT_FOUND", `Unknown product: ${productId}`);
 
-  const rows = await db.query.events.findMany({
-    where: and(
-      eq(schema.events.productId, productId),
-      gte(schema.events.ts, lookbackStart),
-      lte(schema.events.ts, windowEnd),
-    ),
-    columns: { anonId: true, sessionId: true, name: true, referrer: true, utm: true, ts: true },
+  // productId + a range on ts: the (productId, ts) composite index in
+  // firestore.indexes.json. Everything else the funnel needs is computed
+  // from these rows in memory, below.
+  const rows = await database.events.find({
+    where: [
+      ["productId", "==", productId],
+      ["ts", ">=", lookbackStart],
+      ["ts", "<=", windowEnd],
+    ],
   });
 
   return computeFunnel(rows, {

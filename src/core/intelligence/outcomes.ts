@@ -1,9 +1,8 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
-
 import { getFunnelForRange } from "@/core/data/funnel";
 import { AppError } from "@/core/errors";
-import { db, schema, type Database } from "@/db/client";
-import type { FunnelStage } from "@/db/schema";
+import { db, type Database } from "@/db/client";
+import type { FunnelStage, Outcome } from "@/db/schema";
+import { by } from "@/db/sort";
 import type { FunnelResult } from "@/core/data/funnel";
 
 /**
@@ -16,7 +15,7 @@ import type { FunnelResult } from "@/core/data/funnel";
  * human-readable record of what recommend.ts said it hoped for.
  */
 
-export type Outcome = typeof schema.outcomes.$inferSelect;
+export type { Outcome };
 
 /** How long to wait, before and after completion, for a fair comparison. Matches the retention window's own 7-day convention. */
 export const DEFAULT_WINDOW_DAYS = 7;
@@ -41,7 +40,7 @@ export async function evaluateOutcome(taskId: string, options: EvaluateOutcomeOp
   const windowDays = options.windowDays ?? DEFAULT_WINDOW_DAYS;
   const now = options.now ?? new Date();
 
-  const task = await conn.query.tasks.findFirst({ where: eq(schema.tasks.id, taskId) });
+  const task = await conn.tasks.get(taskId);
   if (!task) throw new AppError("NOT_FOUND", `Unknown task: ${taskId}`);
   if (task.status !== "done" || !task.completedAt) {
     throw new AppError("CONFLICT", `Task ${taskId} is not done yet — nothing to evaluate`);
@@ -61,26 +60,21 @@ export async function evaluateOutcome(taskId: string, options: EvaluateOutcomeOp
 
   const beforeWindowStart = new Date(task.completedAt.getTime() - windowMs);
   const [beforeFunnel, afterFunnel] = await Promise.all([
-    getFunnelForRange(task.productId, beforeWindowStart, task.completedAt),
-    getFunnelForRange(task.productId, task.completedAt, afterWindowEnd),
+    getFunnelForRange(task.productId, beforeWindowStart, task.completedAt, conn),
+    getFunnelForRange(task.productId, task.completedAt, afterWindowEnd, conn),
   ]);
 
   const before = sessionsForStage(beforeFunnel, task.stage);
   const after = sessionsForStage(afterFunnel, task.stage);
 
-  const [row] = await conn
-    .insert(schema.outcomes)
-    .values({
-      taskId,
-      metric: `${task.stage} sessions`,
-      before,
-      after,
-      windowDays,
-      delta: after - before,
-    })
-    .returning();
-
-  return row;
+  return conn.outcomes.insert({
+    taskId,
+    metric: `${task.stage} sessions`,
+    before,
+    after,
+    windowDays,
+    delta: after - before,
+  });
 }
 
 export interface PastOutcome {
@@ -110,21 +104,21 @@ export async function getRecentOutcomes(
   // Done only. A practice-mode approval is `approved`, never `done` (see
   // action/execute.ts), and nothing it "caused" belongs in the evidence a
   // diagnosis reasons from.
-  const doneTasks = await conn.query.tasks.findMany({
-    where: and(eq(schema.tasks.productId, productId), eq(schema.tasks.status, "done")),
-    orderBy: (tasks, { desc }) => [desc(tasks.completedAt)],
-  });
+  const doneTasks = (
+    await conn.tasks.find({
+      where: [
+        ["productId", "==", productId],
+        ["status", "==", "done"],
+      ],
+    })
+  ).sort(by((task) => task.completedAt, "desc"));
   if (doneTasks.length === 0) return [];
 
   // One query for every outcome rather than one per task: newest first, so
   // the first row seen for a task is its latest measurement.
-  const outcomes = await conn.query.outcomes.findMany({
-    where: inArray(
-      schema.outcomes.taskId,
-      doneTasks.map((task) => task.id),
-    ),
-    orderBy: [desc(schema.outcomes.evaluatedAt)],
-  });
+  const outcomes = (
+    await conn.outcomes.find({ where: [["taskId", "in", doneTasks.map((task) => task.id)]] })
+  ).sort(by((outcome) => outcome.evaluatedAt, "desc"));
   const latestByTask = new Map<string, Outcome>();
   for (const outcome of outcomes) {
     if (!latestByTask.has(outcome.taskId)) latestByTask.set(outcome.taskId, outcome);

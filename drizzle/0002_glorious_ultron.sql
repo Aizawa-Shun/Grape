@@ -1,1 +1,0 @@
-ALTER TABLE `crawl_pages` ADD `rendered_with` text DEFAULT 'static' NOT NULL;

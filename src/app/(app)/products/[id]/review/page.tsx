@@ -1,11 +1,10 @@
-import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 
 import { Callout } from "@/components/ui/callout";
 import { Page, PageHeader } from "@/components/ui/page";
+import { contextVersions } from "@/core/context/edit";
 import { draftNotesFor, editableValue } from "@/core/context/review";
 import { findOwnedProduct } from "@/core/product/ownership";
-import { db, schema } from "@/db/client";
 import { requireUser } from "@/server/auth/current-user";
 
 import { BackLink } from "../../../back-link";
@@ -32,10 +31,7 @@ export default async function ReviewProductPage({ params }: { params: Promise<{ 
   const product = await findOwnedProduct(id, (await requireUser()).id);
   if (!product) notFound();
 
-  const versions = await db.query.productContexts.findMany({
-    where: eq(schema.productContexts.productId, id),
-    orderBy: (contexts, { desc }) => [desc(contexts.version)],
-  });
+  const versions = await contextVersions(id);
   const latest = versions[0] ?? null;
 
   const header = (

@@ -1,7 +1,6 @@
-import { and, eq } from "drizzle-orm";
-
 import { AppError } from "@/core/errors";
-import { db, schema, type Database } from "@/db/client";
+import { db, type Database } from "@/db/client";
+import type { Product, Task } from "@/db/schema";
 
 /**
  * The one place that answers "may this person see this row".
@@ -20,8 +19,7 @@ import { db, schema, type Database } from "@/db/client";
  * callers can give just as well, in one line, where the session already is.
  */
 
-export type Product = typeof schema.products.$inferSelect;
-export type Task = typeof schema.tasks.$inferSelect;
+export type { Product, Task };
 
 /**
  * The lookup itself. Pages want this, because their way of saying "no such
@@ -34,10 +32,10 @@ export async function findOwnedProduct(
   userId: string,
   database: Database = db,
 ): Promise<Product | null> {
-  const product = await database.query.products.findFirst({
-    where: and(eq(schema.products.id, productId), eq(schema.products.userId, userId)),
-  });
-  return product ?? null;
+  // Fetched by id, then compared — one document read, and a wrong owner reads
+  // exactly like a missing document to the caller.
+  const product = await database.products.get(productId);
+  return product && product.userId === userId ? product : null;
 }
 
 export async function assertProductOwner(
@@ -52,21 +50,15 @@ export async function assertProductOwner(
 
 /**
  * Tasks reach their owner through their product — the same route every other
- * table in the schema takes, which is why only `products` carries `user_id`.
+ * collection takes, which is why only `products` carries `userId`.
  */
 export async function assertTaskOwner(
   taskId: string,
   userId: string,
   database: Database = db,
 ): Promise<{ task: Task; product: Product }> {
-  const rows = await database
-    .select({ task: schema.tasks, product: schema.products })
-    .from(schema.tasks)
-    .innerJoin(schema.products, eq(schema.tasks.productId, schema.products.id))
-    .where(and(eq(schema.tasks.id, taskId), eq(schema.products.userId, userId)))
-    .limit(1);
-
-  const found = rows[0];
-  if (!found) throw new AppError("NOT_FOUND", `No task ${taskId} for this account`);
-  return found;
+  const task = await database.tasks.get(taskId);
+  const product = task ? await findOwnedProduct(task.productId, userId, database) : null;
+  if (!task || !product) throw new AppError("NOT_FOUND", `No task ${taskId} for this account`);
+  return { task, product };
 }

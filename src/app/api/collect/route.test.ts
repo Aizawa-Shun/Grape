@@ -1,9 +1,6 @@
-import { createClient } from "@libsql/client";
-import { drizzle } from "drizzle-orm/libsql";
-import { migrate } from "drizzle-orm/libsql/migrator";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import * as schema from "@/db/schema";
+import type { Store } from "@/db/store/types";
 
 /**
  * Through the real handler, not computeFunnel alone: the UTM bug this guards
@@ -11,14 +8,12 @@ import * as schema from "@/db/schema";
  * listed `source`, and the funnel test passed because it fed `utm_source`
  * straight into computeFunnel without ever going through /api/collect.
  */
-const db = drizzle(createClient({ url: ":memory:" }), { schema });
+let db: Store;
 
 vi.mock("@/db/client", () => ({
   get db() {
     return db;
   },
-  dbReady: Promise.resolve(),
-  schema,
 }));
 
 /**
@@ -34,10 +29,9 @@ async function POST(request: Request) {
 const PRODUCT_ID = "7f1c8a52-3a4b-4c9d-8e2f-1a2b3c4d5e6f";
 
 beforeEach(async () => {
-  await migrate(db, { migrationsFolder: "./drizzle" });
-  await db.delete(schema.events);
-  await db.delete(schema.products);
-  await db.insert(schema.products).values({
+  const { createMemoryStore } = await import("@/db/store/memory");
+  db = createMemoryStore();
+  await db.products.insert({
     id: PRODUCT_ID,
     userId: "owner",
     url: "https://example.com/",
@@ -67,7 +61,7 @@ describe("POST /api/collect", () => {
     );
     expect(response.status).toBe(204);
 
-    const rows = await db.select().from(schema.events);
+    const rows = await db.events.find();
     expect(rows[0].utm).toEqual({ utm_source: "twitter", utm_campaign: "launch" });
 
     // Dynamic for the same reason as POST below: funnel.ts reaches @/db/client.
@@ -95,7 +89,7 @@ describe("POST /api/collect", () => {
       }),
     );
 
-    const rows = await db.select().from(schema.events);
+    const rows = await db.events.find();
     expect(rows[0].utm).toEqual({ utm_source: "x" });
   });
 });

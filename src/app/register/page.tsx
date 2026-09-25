@@ -1,11 +1,12 @@
+import { FirebaseNotConfigured } from "@/components/auth/firebase-not-configured";
 import { Callout } from "@/components/ui/callout";
 import { Card } from "@/components/ui/card";
 import { GrapeMark } from "@/components/ui/grape-mark";
 import { TextLink } from "@/components/ui/text-link";
-import { googleSignInAvailable } from "@/core/auth/google";
 import { accountsExist } from "@/core/auth/users";
+import { clientAuthSettings } from "@/server/auth/firebase-web";
 
-import { GoogleSignInButton } from "../login/google-sign-in-button";
+import { LoginForm } from "../login/login-form";
 import { RegisterForm } from "./register-form";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +25,7 @@ export default async function RegisterPage({
 }) {
   const { invite } = await searchParams;
   const first = !(await accountsExist());
-  const showGoogle = googleSignInAvailable();
+  const settings = clientAuthSettings();
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col justify-center gap-6 px-4 py-16">
@@ -38,49 +39,27 @@ export default async function RegisterPage({
         </p>
       </header>
 
-      {!first && !invite ? (
+      {!settings ? (
+        <FirebaseNotConfigured />
+      ) : !first && !invite ? (
         <Callout tone="attention">
           このGrapeはすでに使われているので、登録には招待が必要です。オーナーに招待リンクを発行してもらってください。
         </Callout>
       ) : (
         <Card>
           <div className="flex flex-col gap-4">
-            <RegisterForm first={first} code={invite ?? ""} />
-            {showGoogle && (
-              <>
-                <div className="flex items-center gap-3 text-xs text-text-muted">
-                  <div className="h-px flex-1 bg-border" />
-                  または
-                  <div className="h-px flex-1 bg-border" />
-                </div>
-                {/*
-                  The invite code (if any) travels the same path a password
-                  registration's does — through /api/auth/google's own
-                  ?invite= into the state cookie — so the Google button on an
-                  invited registration page honors the same code the form
-                  above does.
-                */}
-                <GoogleSignInButton
-                  next="/"
-                  invite={invite}
-                  label={first ? "Googleで始める" : "Googleで登録"}
-                />
-              </>
-            )}
+            <RegisterForm first={first} code={invite ?? ""} settings={settings} />
+            <div className="flex items-center gap-3 text-xs text-text-muted">
+              <div className="h-px flex-1 bg-border" />
+              または
+              <div className="h-px flex-1 bg-border" />
+            </div>
+            {/* The invite travels with a Google sign-up exactly as with the form above. */}
+            <LoginForm next="/" settings={settings} inviteCode={invite} showPassword={false} />
           </div>
         </Card>
       )}
 
-      {/*
-        Offered unconditionally, including on a fresh instance. It was left off
-        there while /login redirected back to this page whenever nobody had
-        registered, which made the link a loop; /login now answers for itself
-        instead, so the choice is a real one in both directions.
-
-        On a fresh instance it leads to a page saying there is nobody to sign
-        in as yet — which is the honest answer to "can I log in instead?", and
-        a better one than an option that is simply missing.
-      */}
       <p className="text-sm text-text-muted">
         すでにアカウントをお持ちですか？ <TextLink href="/login">ログイン</TextLink>
       </p>

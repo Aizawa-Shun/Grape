@@ -1,9 +1,9 @@
-import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { AppError } from "@/core/errors";
 import { runProductSetup } from "@/core/product/register";
-import { db, schema } from "@/db/client";
+import { findOwnedProduct } from "@/core/product/ownership";
+import { db } from "@/db/client";
 import { requireUserId } from "@/server/auth/current-user";
 import { currentRequestId, runInRequestScope } from "@/server/context";
 import { describeError, log } from "@/server/log";
@@ -32,12 +32,9 @@ export const POST = route(
     const { id } = await params;
     const userId = requireUserId();
 
-    const [product] = await db
-      .update(schema.products)
-      .set({ setupStatus: "pending", setupError: null })
-      .where(and(eq(schema.products.id, id), eq(schema.products.userId, userId)))
-      .returning({ id: schema.products.id, url: schema.products.url });
+    const product = await findOwnedProduct(id, userId);
     if (!product) throw new AppError("NOT_FOUND", `No product ${id} for this account`);
+    await db.products.update(id, { setupStatus: "pending", setupError: null });
 
     // Re-entered by hand for the same reason as products/route.ts: the
     // ambient scope ends with this response, and the LLM spend record and

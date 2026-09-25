@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 
 import { toAppError } from "@/core/errors";
 import { loadSettings } from "@/core/settings";
-import { dbReady } from "@/db/client";
 
 import { sessionUserIdFor } from "../auth/current-user";
 import { runInRequestScope } from "../context";
@@ -42,9 +41,6 @@ export function route<Ctx>(
       const path = new URL(request.url).pathname;
 
       try {
-        // Cheap after the first call; guarantees no handler queries the
-        // database before its pragmas are applied.
-        await dbReady;
         // Warms the settings cache so the synchronous readers — log.ts most of
         // all — see the stored overrides rather than the .env defaults. A
         // stored value that no longer validates must not take the request down

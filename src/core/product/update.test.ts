@@ -1,26 +1,17 @@
-import { createClient } from "@libsql/client";
-import { drizzle } from "drizzle-orm/libsql";
-import { migrate } from "drizzle-orm/libsql/migrator";
 import { describe, expect, it } from "vitest";
 
-import * as schema from "@/db/schema";
+import { createMemoryStore } from "@/db/store/memory";
 
 import { updateProduct } from "./update";
 
 async function testDb() {
-  const db = drizzle(createClient({ url: ":memory:" }), { schema });
-  await migrate(db, { migrationsFolder: "./drizzle" });
-  return db;
+  return createMemoryStore();
 }
 
 type TestDb = Awaited<ReturnType<typeof testDb>>;
 
 async function product(db: TestDb, userId: string, url: string) {
-  const [row] = await db
-    .insert(schema.products)
-    .values({ userId, url, name: new URL(url).hostname, setupStatus: "ready" })
-    .returning();
-  return row;
+  return db.products.insert({ userId, url, name: new URL(url).hostname, setupStatus: "ready" });
 }
 
 describe("updateProduct", () => {

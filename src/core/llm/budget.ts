@@ -1,8 +1,8 @@
-import { and, desc, eq, gte, sql } from "drizzle-orm";
-
 import { currentSettings } from "@/core/settings";
 import { currentUserId } from "@/server/context";
-import { db, schema, type Database } from "@/db/client";
+import { db, type Database } from "@/db/client";
+import type { LlmCall } from "@/db/schema";
+import type { Filter } from "@/db/store/types";
 
 import { estimateCostUsd } from "./pricing";
 import { LLMError, type CompletionRequest, type LLMProvider, type Usage } from "./types";
@@ -74,12 +74,17 @@ export async function monthSpendUsd(
   now: Date = new Date(),
   userId?: string,
 ): Promise<number> {
-  const since = gte(schema.llmCalls.createdAt, startOfMonth(now));
-  const rows = await database
-    .select({ total: sql<number>`coalesce(sum(${schema.llmCalls.costUsd}), 0)` })
-    .from(schema.llmCalls)
-    .where(userId ? and(since, eq(schema.llmCalls.userId, userId)) : since);
-  return rows[0]?.total ?? 0;
+  return database.llmCalls.sum("costUsd", thisMonth(now, userId));
+}
+
+/**
+ * This month's calls, optionally one account's. The range filter is on
+ * `createdAt`, and an account's is an equality on `userId` beside it — the
+ * composite index firestore.indexes.json declares for exactly this.
+ */
+function thisMonth(now: Date, userId: string | undefined): Filter<LlmCall>[] {
+  const since: Filter<LlmCall> = ["createdAt", ">=", startOfMonth(now)];
+  return userId ? [["userId", "==", userId], since] : [since];
 }
 
 /**
@@ -87,9 +92,8 @@ export async function monthSpendUsd(
  *
  * /settings already shows the single total, next to the limit it is checked
  * against — that is a setting with its context. This is the other question:
- * having seen the number, which work produced it. Grouped in SQL rather than
- * summed in the page, because the row count grows with every call ever made
- * and the page only ever wants the groups.
+ * having seen the number, which work produced it — grouped by task kind and
+ * by model, the two answers that tell a runaway loop from a pricey model.
  *
  * Estimated throughout, like everything built on `costUsd` — see pricing.ts.
  *
@@ -128,41 +132,35 @@ export async function monthUsage(
   now: Date = new Date(),
   userId?: string,
 ): Promise<MonthUsage> {
-  const since = startOfMonth(now);
-  const thisMonth = userId
-    ? and(gte(schema.llmCalls.createdAt, since), eq(schema.llmCalls.userId, userId))
-    : gte(schema.llmCalls.createdAt, since);
+  // One read of the month's calls, grouped here. Firestore has no GROUP BY,
+  // and a month of one account's calls is small enough that fetching them is
+  // cheaper than an aggregation query per group would be.
+  const calls = await database.llmCalls.find({
+    where: thisMonth(now, userId),
+    orderBy: [["createdAt", "desc"]],
+  });
 
-  const group = async (column: typeof schema.llmCalls.taskKind | typeof schema.llmCalls.model) =>
-    (
-      await database
-        .select({
-          key: column,
-          calls: sql<number>`count(*)`,
-          costUsd: sql<number>`coalesce(sum(${schema.llmCalls.costUsd}), 0)`,
-        })
-        .from(schema.llmCalls)
-        .where(thisMonth)
-        .groupBy(column)
-        .orderBy(sql`sum(${schema.llmCalls.costUsd}) desc`)
-    ).map((row) => ({ key: row.key, calls: Number(row.calls), costUsd: row.costUsd }));
+  const group = (keyOf: (call: LlmCall) => string): SpendGroup[] => {
+    const groups = new Map<string, SpendGroup>();
+    for (const call of calls) {
+      const key = keyOf(call);
+      const group = groups.get(key) ?? { key, calls: 0, costUsd: 0 };
+      group.calls += 1;
+      group.costUsd += call.costUsd;
+      groups.set(key, group);
+    }
+    return [...groups.values()].sort((a, b) => b.costUsd - a.costUsd);
+  };
 
-  const [byTaskKind, byModel, recent] = await Promise.all([
-    group(schema.llmCalls.taskKind),
-    group(schema.llmCalls.model),
-    database
-      .select({
-        id: schema.llmCalls.id,
-        taskKind: schema.llmCalls.taskKind,
-        model: schema.llmCalls.model,
-        costUsd: schema.llmCalls.costUsd,
-        createdAt: schema.llmCalls.createdAt,
-      })
-      .from(schema.llmCalls)
-      .where(thisMonth)
-      .orderBy(desc(schema.llmCalls.createdAt))
-      .limit(RECENT_LIMIT),
-  ]);
+  const byTaskKind = group((call) => call.taskKind);
+  const byModel = group((call) => call.model);
+  const recent: RecentCall[] = calls.slice(0, RECENT_LIMIT).map((call) => ({
+    id: call.id,
+    taskKind: call.taskKind,
+    model: call.model,
+    costUsd: call.costUsd,
+    createdAt: call.createdAt,
+  }));
 
   return {
     spentUsd: byTaskKind.reduce((total, row) => total + row.costUsd, 0),
@@ -211,19 +209,19 @@ export interface RecordCallInput {
 
 export async function recordCall(input: RecordCallInput, database: Database = db): Promise<void> {
   const costUsd = estimateCostUsd(input.provider, input.model, input.usage);
-  await database.insert(schema.llmCalls).values({
-    productId: input.productId,
+  await database.llmCalls.insert({
+    productId: input.productId ?? null,
     // Read here, per call, rather than captured when the provider was wrapped:
     // getProvider() caches one provider across requests, so a user captured at
     // construction would have every later caller's spend billed to them.
     // Undefined for scripts and tests, which is honest — nobody asked for
     // those.
-    userId: input.userId ?? currentUserId(),
+    userId: input.userId ?? currentUserId() ?? null,
     // Assumed valid: every caller currently in this codebase passes a
     // `TaskKind` from `CompletionRequest`, which the schema's own type already
     // constrains. Widened to `string` here only so this module does not need
     // to import the enum for a check the type system already performed once.
-    taskKind: input.taskKind as (typeof schema.llmCalls.$inferInsert)["taskKind"],
+    taskKind: input.taskKind as LlmCall["taskKind"],
     provider: input.provider,
     model: input.model,
     inputTokens: input.usage.inputTokens,

@@ -33,16 +33,6 @@ const httpUrl = (fallback: string) =>
     .default(fallback);
 
 const EnvSchema = z.object({
-  // Trimmed: a platform's environment-variable editor pasting in a trailing
-  // newline is a one-character difference from a valid token, and the only
-  // symptom on the other end is Turso answering every query with a flat 401 —
-  // nothing points back at whitespace. See db/connection.ts, which reads these
-  // two the same way for the standalone scripts that bypass this schema.
-  DATABASE_URL: z.string().trim().default("file:./grape.db"),
-  // Only libsql:// and https:// remote databases need this — a local file:
-  // URL has no server on the other end to authenticate to.
-  DATABASE_AUTH_TOKEN: z.string().trim().optional(),
-
   // --- Intelligence layer -------------------------------------------------
   /**
    * Unset by default — AI is opt-in, not a thing a fresh checkout is quietly
@@ -127,12 +117,13 @@ const EnvSchema = z.object({
   GRAPE_EVENT_RETENTION_DAYS: z.coerce.number().int().positive().default(180),
 
   /**
-   * Signs the session cookie, and so decides whether there can be sessions at
-   * all. Unset is allowed only on a developer's machine, where a non-production
-   * build reached over loopback falls back to a well-known key — see
-   * src/server/session.ts. Anywhere else, unset means every page answers 503.
+   * The key API keys are encrypted with in Firestore (server/secret-box.ts).
+   * Required in production — on App Hosting it is a Secret Manager secret
+   * referenced from apphosting.yaml — and optional elsewhere, where a
+   * development key applies. Changing it makes every stored API key
+   * unreadable; each account then adds theirs again from /account.
    */
-  GRAPE_SESSION_SECRET: z.string().optional(),
+  GRAPE_ENCRYPTION_KEY: z.string().trim().min(16).optional(),
 
   /**
    * What a scheduler presents to POST /api/cron/tick, as a bearer token. Unset
@@ -142,15 +133,16 @@ const EnvSchema = z.object({
    */
   GRAPE_CRON_SECRET: z.string().trim().min(16).optional(),
 
+  // --- Firebase -----------------------------------------------------------
   /**
-   * Both optional, and both required together: "Sign in with Google" is a
-   * button that appears when there is somewhere for it to send someone, not a
-   * thing every install must set up. From the OAuth client's own page in
-   * Google Cloud Console; there is no default because a placeholder client id
-   * would silently fail against Google rather than telling anyone to set this.
+   * The web app's public config (apiKey, authDomain, projectId, appId) as
+   * JSON, handed to the browser so the Firebase client SDK can sign people
+   * in. App Hosting sets this itself at build and run time; locally, copy it
+   * from the Firebase console's project settings — or leave it unset when
+   * running against the emulators, which accept a demo config (see
+   * server/auth/firebase-web.ts).
    */
-  GOOGLE_CLIENT_ID: z.string().trim().optional(),
-  GOOGLE_CLIENT_SECRET: z.string().trim().optional(),
+  FIREBASE_WEBAPP_CONFIG: z.string().optional(),
 
   // --- Operations ---------------------------------------------------------
   GRAPE_LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
@@ -174,29 +166,13 @@ export function isLocalHost(url: string): boolean {
 }
 
 /**
- * Cross-field rules the per-field schema cannot express.
- *
- * API keys used to live here too — `anthropic` required `ANTHROPIC_API_KEY`,
- * `openai-compat` required `OPENAI_API_KEY` unless the endpoint was local —
- * back when one instance-wide credential served every account. Now each
- * account brings its own key (core/auth/users.ts), so there is nothing left
- * for this schema to cross-check: `LLM_PROVIDER` alone says which service is
- * in play, and `getProvider()` is where a *specific user's* credential is
- * required or not.
+ * Cross-field rules the per-field schema cannot express — none at the moment.
+ * API keys used to be checked here against LLM_PROVIDER, and the Google
+ * OAuth client id against its secret; the first are per-account now
+ * (core/auth/users.ts) and Google sign-in is Firebase Authentication's.
+ * Kept as its own name so parseEnv reads the same when one returns.
  */
-const CheckedEnvSchema = EnvSchema.superRefine((value, ctx) => {
-  // Half a pair is worse than neither half: it would show a "Googleでログイン"
-  // button that fails every attempt with a Google-side "invalid_client",
-  // rather than one that simply does not appear.
-  if (Boolean(value.GOOGLE_CLIENT_ID) === Boolean(value.GOOGLE_CLIENT_SECRET)) return;
-
-  const missing = value.GOOGLE_CLIENT_ID ? "GOOGLE_CLIENT_SECRET" : "GOOGLE_CLIENT_ID";
-  ctx.addIssue({
-    code: "custom",
-    path: [missing],
-    message: "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set together, or not at all",
-  });
-});
+const CheckedEnvSchema = EnvSchema;
 
 export type Env = z.infer<typeof EnvSchema>;
 
@@ -256,19 +232,19 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
 export const env: Env = parseEnv(process.env);
 
 /**
- * GRAPE_ADMIN_PASSWORD was the whole authentication system: one shared
- * password, and a session cookie whose key was derived from it. Passwords are
- * now per-account and hashed, so there is nothing left for it to do and
- * nothing left to derive a key from.
- *
- * Said out loud rather than ignored in silence, because an operator who still
- * has it in their .env is holding a belief about how this instance is guarded
- * that stopped being true.
+ * Variables from earlier designs that no longer do anything. Said out loud
+ * rather than ignored in silence, because an operator who still has one set is
+ * holding a belief about how this instance works that stopped being true.
  */
-if (process.env.GRAPE_ADMIN_PASSWORD) {
-  console.warn(
-    "[grape] GRAPE_ADMIN_PASSWORD is no longer used and is being ignored. " +
-      "Accounts have their own passwords now; GRAPE_SESSION_SECRET is what signs sessions. " +
-      "You can remove it from .env.",
-  );
+const RETIRED: Record<string, string> = {
+  GRAPE_ADMIN_PASSWORD: "sign-in is Firebase Authentication now",
+  GRAPE_SESSION_SECRET: "sessions are Firebase session cookies now; API keys are encrypted with GRAPE_ENCRYPTION_KEY",
+  DATABASE_URL: "the database is Firestore now",
+  DATABASE_AUTH_TOKEN: "the database is Firestore now",
+  GOOGLE_CLIENT_ID: "Google sign-in is configured in Firebase Authentication now",
+  GOOGLE_CLIENT_SECRET: "Google sign-in is configured in Firebase Authentication now",
+};
+
+for (const [name, reason] of Object.entries(RETIRED)) {
+  if (process.env[name]) console.warn(`[grape] ${name} is no longer used and is being ignored: ${reason}.`);
 }

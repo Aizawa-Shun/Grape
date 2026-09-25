@@ -1,4 +1,3 @@
-import { eq } from "drizzle-orm";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -13,7 +12,9 @@ import { RereadButton } from "./reread-button";
 import { SetupProgress } from "./setup-progress";
 
 import { findOwnedProduct } from "@/core/product/ownership";
-import { db, schema } from "@/db/client";
+import { contextVersions } from "@/core/context/edit";
+import { db } from "@/db/client";
+import { by } from "@/db/sort";
 import { requireUser } from "@/server/auth/current-user";
 
 // The row changes underneath this page while the crawl runs, and
@@ -37,17 +38,13 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   const product = await findOwnedProduct(id, (await requireUser()).id);
   if (!product) notFound();
 
-  const versions = await db.query.productContexts.findMany({
-    where: eq(schema.productContexts.productId, id),
-    orderBy: (contexts, { desc }) => [desc(contexts.version)],
-  });
+  const versions = await contextVersions(id);
   const latest = versions[0] ?? null;
   const analyzed = versions.find((version) => version.analysis) ?? null;
 
-  const pages = await db.query.crawlPages.findMany({
-    where: eq(schema.crawlPages.productId, id),
-    orderBy: (crawlPages, { desc }) => [desc(crawlPages.fetchedAt)],
-  });
+  const pages = (await db.crawlPages.find({ where: [["productId", "==", id]] })).sort(
+    by((page) => page.fetchedAt, "desc"),
+  );
 
   return (
     <Page>

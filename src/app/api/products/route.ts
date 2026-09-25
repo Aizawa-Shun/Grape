@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { runProductSetup, startProductSetup } from "@/core/product/register";
 import { db } from "@/db/client";
+import { by } from "@/db/sort";
 import { requireUserId } from "@/server/auth/current-user";
 import { currentRequestId, runInRequestScope } from "@/server/context";
 import { describeError, log } from "@/server/log";
@@ -16,10 +17,9 @@ const RegisterInputSchema = z.object({
 });
 
 export const GET = route("products.list", async () => {
-  const products = await db.query.products.findMany({
-    where: (products, { eq }) => eq(products.userId, requireUserId()),
-    orderBy: (products, { desc }) => [desc(products.createdAt)],
-  });
+  const products = (await db.products.find({ where: [["userId", "==", requireUserId()]] })).sort(
+    by((product) => product.createdAt, "desc"),
+  );
   return NextResponse.json({ products });
 });
 

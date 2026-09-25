@@ -1,36 +1,28 @@
 "use client";
 
+import { sendPasswordResetEmail } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import { clientAuth } from "@/components/auth/firebase-client";
 import { Button } from "@/components/ui/button";
 import { Field, controlClass } from "@/components/ui/field";
 import { Status } from "@/components/ui/status";
-import { MIN_PASSWORD_LENGTH } from "@/core/auth/policy";
-
-interface Props {
-  displayName: string;
-  email: string;
-}
+import type { ClientAuthSettings } from "@/server/auth/firebase-web";
 
 /**
- * Two forms rather than one, and two cards rather than one, because they
- * answer to different rules: the profile saves on the session alone, and the
- * password asks for the old one. Merged, a single save button would have had
- * to demand the current password to change a display name — and run together
- * under one border, the second form's first field reads as a third field of
- * the first.
+ * The display name is Grape's; the e-mail address and password are Firebase
+ * Authentication's. So this form edits one field and shows the address as
+ * what it is — the sign-in identity, changed through Firebase if at all.
  */
-export function ProfileForm({ displayName: initialName, email: initialEmail }: Props) {
+export function ProfileForm({ displayName: initialName, email }: { displayName: string; email: string }) {
   const router = useRouter();
   const [displayName, setDisplayName] = useState(initialName);
-  const [email, setEmail] = useState(initialEmail);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [pending, startTransition] = useTransition();
 
-  const changed = displayName !== initialName || email !== initialEmail;
-  const ready = changed && displayName.trim().length > 0 && email.trim().length > 0;
+  const ready = displayName !== initialName && displayName.trim().length > 0;
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -41,7 +33,7 @@ export function ProfileForm({ displayName: initialName, email: initialEmail }: P
       const response = await fetch("/api/account", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ displayName, email }),
+        body: JSON.stringify({ displayName }),
       });
       const body = await response.json().catch(() => ({}));
 
@@ -50,8 +42,8 @@ export function ProfileForm({ displayName: initialName, email: initialEmail }: P
         return;
       }
       setSaved(true);
-      // The account menu at the bottom of every page shows both of these, so
-      // leaving the shell on the old values would look like the save missed.
+      // The account menu at the bottom of every page shows the name, so
+      // leaving the shell on the old value would look like the save missed.
       router.refresh();
     });
   }
@@ -73,21 +65,11 @@ export function ProfileForm({ displayName: initialName, email: initialEmail }: P
         )}
       </Field>
 
-      <Field label="メールアドレス" hint="ログインに使います。">
-        {(props) => (
-          <input
-            {...props}
-            type="email"
-            autoComplete="username"
-            value={email}
-            onChange={(e) => {
-              setEmail(e.target.value);
-              setSaved(false);
-            }}
-            className={controlClass}
-          />
-        )}
-      </Field>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-sm font-medium">メールアドレス</span>
+        <span className="text-sm text-text-muted">{email}</span>
+        <span className="text-xs text-text-muted">ログインに使うアドレスです。</span>
+      </div>
 
       {error && <Status tone="error">{error}</Status>}
       {saved && <Status>保存しました。</Status>}
@@ -101,83 +83,41 @@ export function ProfileForm({ displayName: initialName, email: initialEmail }: P
   );
 }
 
-export function PasswordForm() {
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
+/**
+ * Changing a password is Firebase's reset flow: an e-mail with a link to a
+ * page where the new one is set. Grape never sees either password, and the
+ * link proves control of the address — which is what asking for the current
+ * password used to stand in for.
+ */
+export function PasswordResetForm({ email, settings }: { email: string; settings: ClientAuthSettings }) {
+  const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
   const [pending, startTransition] = useTransition();
 
-  const ready = currentPassword.length > 0 && newPassword.length >= MIN_PASSWORD_LENGTH;
-
-  function submit(event: React.FormEvent) {
-    event.preventDefault();
+  function send() {
     setError(null);
-    setDone(false);
-
     startTransition(async () => {
-      const response = await fetch("/api/account/password", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ currentPassword, newPassword }),
-      });
-      const body = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        setError(body.error ?? "変更できませんでした。");
-        return;
+      try {
+        await sendPasswordResetEmail(clientAuth(settings), email);
+        setSent(true);
+      } catch {
+        setError("送れませんでした。しばらくしてから、もう一度お試しください。");
       }
-      setDone(true);
-      setCurrentPassword("");
-      setNewPassword("");
     });
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-4">
-      <Field label="いまのパスワード">
-        {(props) => (
-          <input
-            {...props}
-            type="password"
-            autoComplete="current-password"
-            value={currentPassword}
-            onChange={(e) => {
-              setCurrentPassword(e.target.value);
-              setDone(false);
-            }}
-            className={controlClass}
-          />
-        )}
-      </Field>
-
-      <Field
-        label="新しいパスワード"
-        hint={`${MIN_PASSWORD_LENGTH}文字以上。記号の混在より長さのほうが効きます。`}
-      >
-        {(props) => (
-          <input
-            {...props}
-            type="password"
-            autoComplete="new-password"
-            value={newPassword}
-            onChange={(e) => {
-              setNewPassword(e.target.value);
-              setDone(false);
-            }}
-            className={controlClass}
-          />
-        )}
-      </Field>
-
+    <div className="flex flex-col gap-3">
+      <p className="text-sm text-text-muted">
+        {email} にパスワード再設定の案内を送ります。メールのリンクから新しいパスワードを決めてください。
+      </p>
       {error && <Status tone="error">{error}</Status>}
-      {done && <Status>パスワードを変更しました。</Status>}
-
+      {sent && <Status>送りました。メールを確認してください。</Status>}
       <div>
-        <Button type="submit" variant="primary" loading={pending} disabled={!ready}>
-          {pending ? "変更中…" : "パスワードを変える"}
+        <Button onClick={send} loading={pending} disabled={sent}>
+          {pending ? "送っています…" : "再設定のメールを送る"}
         </Button>
       </div>
-    </form>
+    </div>
   );
 }

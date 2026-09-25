@@ -1,12 +1,11 @@
-import { and, eq, isNotNull, lte, notExists } from "drizzle-orm";
-
 import { toAppError } from "@/core/errors";
 import { diagnoseProduct } from "@/core/intelligence/diagnose";
 import { DEFAULT_WINDOW_DAYS, evaluateOutcome } from "@/core/intelligence/outcomes";
 import { recommendTasks } from "@/core/intelligence/recommend";
 import { llmAvailable } from "@/core/llm";
 import { DIAGNOSIS_STALE_DAYS } from "@/core/product/next-step";
-import { db, schema, type Database } from "@/db/client";
+import { db, type Database } from "@/db/client";
+import { by, firstBy } from "@/db/sort";
 import { runInRequestScope } from "@/server/context";
 import { describeError, log } from "@/server/log";
 
@@ -100,20 +99,22 @@ async function tick(options: LoopTickOptions): Promise<LoopTickResult> {
   const result: LoopTickResult = { measured: 0, diagnosed: 0, skipped: [], failed: [] };
 
   // --- 1. Measure -----------------------------------------------------------
-  const due = await conn.query.tasks.findMany({
-    where: and(
-      eq(schema.tasks.status, "done"),
-      isNotNull(schema.tasks.completedAt),
-      lte(schema.tasks.completedAt, new Date(now.getTime() - DEFAULT_WINDOW_DAYS * DAY_MS)),
-      notExists(
-        conn
-          .select({ id: schema.outcomes.id })
-          .from(schema.outcomes)
-          .where(eq(schema.outcomes.taskId, schema.tasks.id)),
-      ),
-    ),
-    columns: { id: true },
-  });
+  // Done tasks, with the seven-day line applied in code: a range on
+  // completedAt next to an equality on status would need its own composite
+  // index, and the set of done tasks is small. The ones already measured are
+  // dropped with one `in` query rather than a lookup per task.
+  const cutoff = now.getTime() - DEFAULT_WINDOW_DAYS * DAY_MS;
+  const doneLongEnough = (await conn.tasks.find({ where: [["status", "==", "done"]] })).filter(
+    (task) => task.completedAt !== null && task.completedAt.getTime() <= cutoff,
+  );
+  const measuredAlready = new Set(
+    doneLongEnough.length === 0
+      ? []
+      : (
+          await conn.outcomes.find({ where: [["taskId", "in", doneLongEnough.map((task) => task.id)]] })
+        ).map((outcome) => outcome.taskId),
+  );
+  const due = doneLongEnough.filter((task) => !measuredAlready.has(task.id));
 
   for (const task of due) {
     try {
@@ -130,18 +131,14 @@ async function tick(options: LoopTickOptions): Promise<LoopTickResult> {
     return result;
   }
 
-  const products = await conn.query.products.findMany({
-    where: eq(schema.products.setupStatus, "ready"),
-    columns: { id: true, userId: true },
-  });
+  const products = await conn.products.find({ where: [["setupStatus", "==", "ready"]] });
   const staleBefore = now.getTime() - DIAGNOSIS_STALE_DAYS * DAY_MS;
 
   for (const product of products) {
-    const latest = await conn.query.diagnoses.findFirst({
-      where: eq(schema.diagnoses.productId, product.id),
-      orderBy: (diagnoses, { desc }) => [desc(diagnoses.createdAt)],
-      columns: { createdAt: true },
-    });
+    const latest = firstBy(
+      await conn.diagnoses.find({ where: [["productId", "==", product.id]] }),
+      by((diagnosis) => diagnosis.createdAt, "desc"),
+    );
     if (!latest) continue; // never diagnosed: the first one is the owner's call
     if (latest.createdAt.getTime() > staleBefore) continue;
 

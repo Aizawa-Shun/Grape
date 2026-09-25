@@ -1,8 +1,7 @@
-import { eq, sql } from "drizzle-orm";
-
 import { DEFAULT_WINDOW_DAYS } from "@/core/intelligence/outcomes";
-import { db, schema, type Database } from "@/db/client";
-import type { Channel, DiagnosisMode, FunnelStage, TaskStatus } from "@/db/schema";
+import { db, type Database } from "@/db/client";
+import type { Channel, DiagnosisMode, FunnelStage, ProductSetupStatus, TaskStatus } from "@/db/schema";
+import { by, firstBy } from "@/db/sort";
 
 /**
  * What one person should do next, across everything they have registered.
@@ -26,7 +25,7 @@ export interface StepProduct {
   name: string;
   url: string;
   /** So the dashboard can say "still reading" instead of "not diagnosed yet" — see schema.ts. */
-  setupStatus: schema.ProductSetupStatus;
+  setupStatus: ProductSetupStatus;
 }
 
 export interface StepTask {
@@ -170,65 +169,62 @@ export async function loadSnapshots(
 
   // Required rather than optional, for the same reason as loadNavProducts:
   // this returns a list, and whose list it is cannot be an afterthought.
-  const products = await conn.query.products.findMany({
-    where: eq(schema.products.userId, userId),
-    orderBy: (products, { asc }) => [asc(products.createdAt)],
-  });
+  const products = (await conn.products.find({ where: [["userId", "==", userId]] })).sort(
+    by((product) => product.createdAt),
+  );
 
   return Promise.all(
     products.map(async (product) => {
-      const [events] = await conn
-        .select({ n: sql<number>`count(*)` })
-        .from(schema.events)
-        .where(eq(schema.events.productId, product.id));
+      const [eventCount, contexts, diagnoses, tasksRaw] = await Promise.all([
+        // A server-side count: a product's events are the one collection that
+        // is too large to fetch just to learn whether there are any.
+        conn.events.count([["productId", "==", product.id]]),
+        conn.productContexts.find({ where: [["productId", "==", product.id]] }),
+        conn.diagnoses.find({ where: [["productId", "==", product.id]] }),
+        conn.tasks.find({ where: [["productId", "==", product.id]] }),
+      ]);
 
-      const context = await conn.query.productContexts.findFirst({
-        where: eq(schema.productContexts.productId, product.id),
-        orderBy: (contexts, { desc }) => [desc(contexts.version)],
-        columns: { editedByHuman: true },
+      const context = firstBy(contexts, by((row) => row.version, "desc"));
+      const diagnosis = firstBy(diagnoses, by((row) => row.createdAt, "desc"));
+      const tasks = tasksRaw.sort(by((task) => task.impact, "desc"));
+
+      // Every task's artifacts and outcomes in one query each, rather than two
+      // per task.
+      const taskIds = tasks.map((task) => task.id);
+      const [artifacts, outcomes] =
+        taskIds.length === 0
+          ? [[], []]
+          : await Promise.all([
+              conn.artifacts.find({ where: [["taskId", "in", taskIds]] }),
+              conn.outcomes.find({ where: [["taskId", "in", taskIds]] }),
+            ]);
+      const hasArtifact = new Set(artifacts.map((artifact) => artifact.taskId));
+      const latestOutcome = new Map<string, (typeof outcomes)[number]>();
+      for (const outcome of outcomes.sort(by((row) => row.evaluatedAt, "desc"))) {
+        if (!latestOutcome.has(outcome.taskId)) latestOutcome.set(outcome.taskId, outcome);
+      }
+
+      const withState = tasks.map((task) => {
+        const outcome = latestOutcome.get(task.id);
+        return {
+          id: task.id,
+          title: task.title,
+          status: task.status,
+          stage: task.stage,
+          channel: task.channel,
+          completedAt: task.completedAt,
+          hasArtifact: hasArtifact.has(task.id),
+          outcome: outcome
+            ? {
+                before: outcome.before,
+                after: outcome.after,
+                delta: outcome.delta,
+                windowDays: outcome.windowDays,
+                evaluatedAt: outcome.evaluatedAt,
+              }
+            : null,
+        } satisfies TaskSnapshot;
       });
-
-      const diagnosis = await conn.query.diagnoses.findFirst({
-        where: eq(schema.diagnoses.productId, product.id),
-        orderBy: (diagnoses, { desc }) => [desc(diagnoses.createdAt)],
-        columns: { createdAt: true, mode: true, bottleneckStage: true },
-      });
-
-      const tasks = await conn.query.tasks.findMany({
-        where: eq(schema.tasks.productId, product.id),
-        orderBy: (tasks, { desc }) => [desc(tasks.impact)],
-      });
-
-      const withState = await Promise.all(
-        tasks.map(async (task) => {
-          const artifact = await conn.query.artifacts.findFirst({
-            where: eq(schema.artifacts.taskId, task.id),
-            columns: { id: true },
-          });
-          const outcome = await conn.query.outcomes.findFirst({
-            where: eq(schema.outcomes.taskId, task.id),
-            orderBy: (outcomes, { desc }) => [desc(outcomes.evaluatedAt)],
-          });
-          return {
-            id: task.id,
-            title: task.title,
-            status: task.status,
-            stage: task.stage,
-            channel: task.channel,
-            completedAt: task.completedAt,
-            hasArtifact: artifact !== undefined,
-            outcome: outcome
-              ? {
-                  before: outcome.before,
-                  after: outcome.after,
-                  delta: outcome.delta,
-                  windowDays: outcome.windowDays,
-                  evaluatedAt: outcome.evaluatedAt,
-                }
-              : null,
-          } satisfies TaskSnapshot;
-        }),
-      );
 
       return {
         product: {
@@ -238,7 +234,7 @@ export async function loadSnapshots(
           setupStatus: product.setupStatus,
         },
         keyEventName: product.keyEventName,
-        eventCount: Number(events?.n ?? 0),
+        eventCount,
         contextEditedByHuman: context ? context.editedByHuman : null,
         latestDiagnosisAt: diagnosis?.createdAt ?? null,
         latestDiagnosisMode: diagnosis?.mode ?? null,

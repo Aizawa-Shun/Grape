@@ -1,38 +1,31 @@
-import { createClient } from "@libsql/client";
-import { drizzle } from "drizzle-orm/libsql";
-import { migrate } from "drizzle-orm/libsql/migrator";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import * as schema from "@/db/schema";
+import type { Store } from "@/db/store/types";
 
 /**
- * The disagreement the Edge cannot see.
+ * What a verified session turns into. The Firebase Admin SDK's own
+ * verification is stood in for here — its job (signature, expiry,
+ * revocation) is Firebase's to test — so this checks Grape's half: that a
+ * session is only as good as the account document behind it, and that an
+ * unverifiable cookie is a signed-out reader rather than an error.
  *
- * proxy.ts verifies the session cookie's signature and deliberately reads no
- * database, because it runs on every request including the ingest hot path. So
- * a cookie naming an account that no longer exists is, to the proxy, a valid
- * session — and the page behind it used to throw, answering 500 twice per
- * request with no way out from the browser, since a reload sends the same
- * cookie again.
- *
- * A real migrated database rather than a mock: what is under test is what
- * happens when a row is *absent*, which a stubbed query would only assert
- * about itself.
+ * The end-to-end half, with real session cookies minted by the Auth
+ * emulator, is e2e/auth.e2e.ts.
  */
-const db = drizzle(createClient({ url: ":memory:" }), { schema });
-
+let db: Store;
 vi.mock("@/db/client", () => ({
   get db() {
     return db;
   },
-  schema,
 }));
 
-const SECRET = "test-signing-secret";
-const cookieStore = { value: undefined as string | undefined };
+const verified = vi.fn<(cookie: string) => Promise<{ uid: string }>>();
+vi.mock("@/db/firebase", () => ({
+  firebaseAuth: () => ({ verifySessionCookie: (cookie: string) => verified(cookie) }),
+}));
 
+const cookieStore = { value: undefined as string | undefined };
 vi.mock("next/headers", () => ({
-  headers: async () => new Headers({ host: "grape.example.com" }),
   cookies: async () => ({ get: () => (cookieStore.value ? { value: cookieStore.value } : undefined) }),
 }));
 
@@ -49,56 +42,69 @@ vi.mock("next/navigation", () => ({
 }));
 
 beforeEach(async () => {
-  vi.stubEnv("GRAPE_SESSION_SECRET", SECRET);
-  await migrate(db, { migrationsFolder: "./drizzle" });
-  await db.delete(schema.users);
+  const { createMemoryStore } = await import("@/db/store/memory");
+  db = createMemoryStore();
   cookieStore.value = undefined;
+  verified.mockReset();
 });
-
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
-
-async function signInAs(userId: string) {
-  const { issueSession } = await import("@/server/session");
-  cookieStore.value = await issueSession(SECRET, userId);
-}
 
 describe("requireUser", () => {
-  it("loads the account a valid session names", async () => {
-    const [user] = await db
-      .insert(schema.users)
-      .values({
-        email: "owner@example.com",
-        displayName: "Owner",
-        passwordHash: "x",
-        role: "owner",
-      })
-      .returning();
-    await signInAs(user.id);
+  it("loads the account a verified session belongs to", async () => {
+    await db.users.set("uid-owner", { email: "owner@example.com", displayName: "Owner", role: "owner" });
+    cookieStore.value = "session-cookie";
+    verified.mockResolvedValue({ uid: "uid-owner" });
 
     const { requireUser } = await import("./current-user");
     expect((await requireUser()).email).toBe("owner@example.com");
+    expect(verified).toHaveBeenCalledWith("session-cookie");
   });
 
-  it("sends a session naming a missing account to /login instead of failing the render", async () => {
-    await signInAs("11111111-2222-3333-4444-555555555555");
+  /** An account removed from Grape, or never let in: a signed-out reader, not a 500. */
+  it("sends a valid session with no Grape account behind it to /login", async () => {
+    cookieStore.value = "session-cookie";
+    verified.mockResolvedValue({ uid: "uid-nobody" });
 
     const { requireUser } = await import("./current-user");
     await expect(requireUser()).rejects.toThrow("redirect:/login");
+  });
+
+  it("treats a cookie that does not verify as no session at all", async () => {
+    cookieStore.value = "forged";
+    verified.mockRejectedValue(new Error("auth/session-cookie-revoked"));
+
+    const { currentUser } = await import("./current-user");
+    expect(await currentUser()).toBeNull();
   });
 });
 
 describe("requireApiUser", () => {
   /**
    * A route handler answers a fetch. A 307 to an HTML sign-in page is not
-   * something the caller can do anything with, so this one still throws and
-   * gets its 401.
+   * something the caller can do anything with, so this one throws and gets
+   * its 401.
    */
-  it("throws for the same session rather than redirecting a fetch", async () => {
-    await signInAs("11111111-2222-3333-4444-555555555555");
-
+  it("throws rather than redirecting a fetch", async () => {
     const { requireApiUser } = await import("./current-user");
     await expect(requireApiUser()).rejects.toThrow(/No session on a route that requires one/);
+  });
+});
+
+describe("sessionUserIdFor", () => {
+  it("reads the __session cookie off the request it is handed", async () => {
+    verified.mockResolvedValue({ uid: "uid-owner" });
+    const { sessionUserIdFor } = await import("./current-user");
+
+    const request = new Request("https://grape.example.com/api/products", {
+      headers: { cookie: "other=1; __session=abc%2Fdef" },
+    });
+    expect(await sessionUserIdFor(request)).toBe("uid-owner");
+    expect(verified).toHaveBeenCalledWith("abc/def");
+  });
+
+  it("answers undefined without asking Firebase when there is no cookie", async () => {
+    const { sessionUserIdFor } = await import("./current-user");
+
+    expect(await sessionUserIdFor(new Request("https://grape.example.com/"))).toBeUndefined();
+    expect(verified).not.toHaveBeenCalled();
   });
 });

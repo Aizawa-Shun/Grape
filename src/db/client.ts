@@ -1,18 +1,12 @@
-import { createClient, type Client } from "@libsql/client";
-import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
+import { createFirestoreStore } from "./store/firestore";
+import type { Store } from "./store/types";
 
-import { applyPragmas } from "./pragmas";
-import { databaseCredentials } from "./connection";
-import * as schema from "./schema";
-
-export type Database = LibSQLDatabase<typeof schema>;
+export type { Store } from "./store/types";
+export type Database = Store;
 
 /**
- * This module is server-only. Importing it from a `"use client"` file drags
- * @libsql/client into the browser bundle, where the web build rejects the
- * file: URL of a local database and the failure surfaces as a chunk that will
- * not evaluate — every page it is bundled with goes blank. Fail here instead,
- * naming the actual mistake.
+ * This module is server-only — see db/firebase.ts. Failing here names the
+ * actual mistake instead of a Firebase Admin error deep inside a chunk.
  */
 if (typeof window !== "undefined") {
   throw new Error(
@@ -20,40 +14,44 @@ if (typeof window !== "undefined") {
   );
 }
 
-/**
- * Next's dev server re-evaluates modules on every hot reload. Without a cache
- * on globalThis that leaks a new libsql connection per edit until the process
- * runs out of file handles.
- */
-const globalForDb = globalThis as typeof globalThis & {
-  __grapeSqlClient?: Client;
-  __grapeDb?: Database;
-  __grapeDbReady?: Promise<void>;
-};
+let store: Store | null = null;
 
-function create(): { client: Client; db: Database } {
-  const client = createClient(databaseCredentials());
-  return { client, db: drizzle(client, { schema }) };
+async function load(): Promise<Store> {
+  if (!store) {
+    const { firestore } = await import("./firebase");
+    store = createFirestoreStore(firestore());
+  }
+  return store;
 }
 
-const existing = globalForDb.__grapeDb && globalForDb.__grapeSqlClient;
-const created = existing
-  ? { client: globalForDb.__grapeSqlClient!, db: globalForDb.__grapeDb! }
-  : create();
-
 /**
- * Awaited once by the route wrapper before any handler runs, so no query can
- * reach the database before the pragmas above are in effect.
+ * The Store every module defaults to, backed by Firestore.
+ *
+ * Lazy: nothing touches Firebase until the first call. That keeps importing a
+ * core module free — a unit test that passes its own in-memory store never
+ * initializes the Admin SDK, and neither does `next build` collecting pages.
+ * Each method resolves the real store on first use and forwards to it.
  */
-export const dbReady: Promise<void> =
-  globalForDb.__grapeDbReady ?? applyPragmas(created.client);
-
-if (process.env.NODE_ENV !== "production") {
-  globalForDb.__grapeSqlClient = created.client;
-  globalForDb.__grapeDb = created.db;
-  globalForDb.__grapeDbReady = dbReady;
+function lazyCollection(name: string) {
+  return new Proxy(
+    {},
+    {
+      get(_target, method: string) {
+        return async (...args: unknown[]) => {
+          const real = (await load()) as unknown as Record<string, Record<string, (...a: unknown[]) => unknown>>;
+          return real[name][method](...args);
+        };
+      },
+    },
+  );
 }
 
-export const sqlClient = created.client;
-export const db = created.db;
-export { schema };
+export const db: Store = new Proxy({} as Store, {
+  get(_target, key: string) {
+    if (key === "runTransaction") {
+      return async (fn: Parameters<Store["runTransaction"]>[0]) => (await load()).runTransaction(fn);
+    }
+    if (key === "then") return undefined; // not a thenable
+    return lazyCollection(key);
+  },
+});

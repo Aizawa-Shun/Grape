@@ -1,9 +1,8 @@
-import { eq, lt } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { readTextCapped } from "@/core/net/read";
-import { db, dbReady, schema } from "@/db/client";
+import { db } from "@/db/client";
 import { currentSettings } from "@/core/settings";
 import { describeError, log } from "@/server/log";
 import { clientAddress, takeToken } from "@/server/rate-limit";
@@ -85,8 +84,6 @@ export async function OPTIONS() {
 }
 
 export async function POST(request: Request) {
-  await dbReady;
-
   const origin = request.headers.get("origin");
   const cors = corsHeaders(origin);
   const reject = (status: number, error: string, extra: Record<string, string> = {}) =>
@@ -124,7 +121,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    await db.insert(schema.events).values({
+    await db.events.insert({
       productId: input.productId,
       anonId: input.anonId,
       sessionId: input.sessionId,
@@ -173,10 +170,7 @@ async function registeredHost(productId: string): Promise<string | null> {
   const cached = hostCache.get(productId);
   if (cached && Date.now() - cached.at < HOST_CACHE_MS) return cached.host;
 
-  const product = await db.query.products.findFirst({
-    where: eq(schema.products.id, productId),
-    columns: { url: true },
-  });
+  const product = await db.products.get(productId);
   const host = product ? new URL(product.url).hostname.toLowerCase() : null;
   hostCache.set(productId, { host, at: Date.now() });
   return host;
@@ -207,9 +201,8 @@ function schedulePrune(): void {
     Date.now() - currentSettings().GRAPE_EVENT_RETENTION_DAYS * 24 * 60 * 60 * 1000,
   );
 
-  void db
-    .delete(schema.events)
-    .where(lt(schema.events.ts, cutoff))
+  void db.events
+    .deleteWhere([["ts", "<", cutoff]])
     .then(() => log.info("events.pruned", { before: cutoff.toISOString() }))
     .catch((error: unknown) => log.warn("events.prune_failed", { error: String(error) }))
     .finally(() => {

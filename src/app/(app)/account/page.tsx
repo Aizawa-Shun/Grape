@@ -2,19 +2,17 @@ import { Card } from "@/components/ui/card";
 import { Page, PageHeader, Section } from "@/components/ui/page";
 import { hasLlmApiKeys } from "@/core/auth/users";
 import { requireUser } from "@/server/auth/current-user";
-import { hasPassword } from "@/server/auth/password";
+import { clientAuthSettings } from "@/server/auth/firebase-web";
 
-import { PasswordForm, ProfileForm } from "./account-form";
+import { PasswordResetForm, ProfileForm } from "./account-form";
 import { LlmKeyForm } from "./llm-key-form";
 
 export const dynamic = "force-dynamic";
 
 /**
- * This page existed once as a placeholder that said "not built yet", and was
- * deleted for describing a product shape the architecture ruled out: there was
- * no user table to hold a profile. There is one now — name, address and a
- * scrypt hash — so every field here writes to a real column, which is the only
- * condition on which it comes back.
+ * The account as Grape sees it: a display name of its own, a sign-in identity
+ * that belongs to Firebase Authentication, and the API keys this person pays
+ * for their AI calls with.
  *
  * Still absent, and deliberately: deleting the account. On a self-hosted
  * instance the owner's account is what everything else hangs off, and a button
@@ -24,12 +22,22 @@ export const dynamic = "force-dynamic";
 export default async function AccountPage() {
   const user = await requireUser();
   const llmKeyStatus = await hasLlmApiKeys(user.id);
+  const settings = clientAuthSettings();
+
+  // Which ways this account can sign in, from Firebase itself: a Google-only
+  // account has no password to reset, and offering it one would be a form
+  // that explains nothing when it fails.
+  const { firebaseAuth } = await import("@/db/firebase");
+  const record = await firebaseAuth()
+    .getUser(user.id)
+    .catch(() => null);
+  const hasPassword = record?.providerData.some((provider) => provider.providerId === "password") ?? false;
 
   return (
     <Page>
       <PageHeader
         title="アカウント"
-        description="ログインに使う情報です。名前・メール・パスワードはこのGrapeの中だけで完結していて、どこにも送られません。"
+        description="ログインに使う情報です。メールアドレスとパスワードは Firebase Authentication が管理しています。"
       />
 
       <Section
@@ -43,25 +51,17 @@ export default async function AccountPage() {
         </Card>
       </Section>
 
-      {hasPassword(user.passwordHash) ? (
-        <Section title="パスワード" description="変えるには、いま使っているパスワードが要ります。">
-          <Card>
-            <PasswordForm />
-          </Card>
-        </Section>
-      ) : (
-        // A password-changing form for an account with no password would ask
-        // for a "current password" that verifies against nothing — every
-        // attempt fails with a message that explains nothing, since the
-        // account really has no password to get right.
-        <Section title="パスワード">
-          <Card>
+      <Section title="パスワード">
+        <Card>
+          {hasPassword && settings ? (
+            <PasswordResetForm email={user.email} settings={settings} />
+          ) : (
             <p className="text-sm text-text-muted">
               Googleアカウントでログインしています。パスワードは設定されていません。
             </p>
-          </Card>
-        </Section>
-      )}
+          )}
+        </Card>
+      </Section>
 
       <Section
         title="AIのAPIキー"

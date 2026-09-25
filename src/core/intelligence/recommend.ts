@@ -1,11 +1,11 @@
-import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { renderContextSnapshot } from "@/core/context/snapshot";
 import { AppError } from "@/core/errors";
 import { getProvider, type LLMProvider } from "@/core/llm";
-import { db, schema, type Database } from "@/db/client";
-import type { Channel } from "@/db/schema";
+import { getContextVersion } from "@/core/context/edit";
+import { db, type Database } from "@/db/client";
+import type { Channel, Task } from "@/db/schema";
 
 import type { Diagnosis } from "./diagnose";
 
@@ -72,7 +72,7 @@ function isoWeekString(date: Date): string {
 
 export { isoWeekString };
 
-export type Task = typeof schema.tasks.$inferSelect;
+export type { Task };
 
 export interface RecommendOptions {
   provider?: LLMProvider;
@@ -85,15 +85,10 @@ export async function recommendTasks(diagnosis: Diagnosis, options: RecommendOpt
   const provider = options.provider ?? (await getProvider());
   const now = options.now ?? new Date();
 
-  const product = await conn.query.products.findFirst({ where: eq(schema.products.id, diagnosis.productId) });
+  const product = await conn.products.get(diagnosis.productId);
   if (!product) throw new AppError("NOT_FOUND", `Unknown product: ${diagnosis.productId}`);
 
-  const contextVersion = await conn.query.productContexts.findFirst({
-    where: and(
-      eq(schema.productContexts.productId, diagnosis.productId),
-      eq(schema.productContexts.version, diagnosis.contextVersion),
-    ),
-  });
+  const contextVersion = await getContextVersion(diagnosis.productId, diagnosis.contextVersion, conn);
 
   if (!contextVersion) {
     throw new AppError(
@@ -133,5 +128,7 @@ export async function recommendTasks(diagnosis: Diagnosis, options: RecommendOpt
     dueWeek,
   }));
 
-  return conn.insert(schema.tasks).values(rows).returning();
+  // One write per task, together: a batch of 1-3 that either lands whole or
+  // not at all, so a diagnosis never ends up with half its tasks.
+  return conn.runTransaction(async (tx) => Promise.all(rows.map((row) => tx.tasks.insert(row))));
 }

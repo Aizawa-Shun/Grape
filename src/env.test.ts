@@ -6,7 +6,6 @@ describe("parseEnv", () => {
   it("runs on defaults alone, so a fresh checkout starts without configuration", () => {
     const env = parseEnv({});
 
-    expect(env.DATABASE_URL).toBe("file:./grape.db");
     expect(env.LLM_PROVIDER).toBeUndefined();
     expect(env.COLD_START_MIN_SESSIONS).toBe(30);
   });
@@ -85,27 +84,18 @@ describe("parseEnv", () => {
     });
   });
 
-  it("allows neither GOOGLE_CLIENT_ID nor GOOGLE_CLIENT_SECRET, the ordinary no-Google-login case", () => {
-    expect(() => parseEnv({})).not.toThrow();
+  it("trims whitespace pasted around the secrets", () => {
+    const env = parseEnv({
+      GRAPE_ENCRYPTION_KEY: " a-long-encryption-key\n",
+      GRAPE_CRON_SECRET: " a-long-cron-secret-value \n",
+    });
+    expect(env.GRAPE_ENCRYPTION_KEY).toBe("a-long-encryption-key");
+    expect(env.GRAPE_CRON_SECRET).toBe("a-long-cron-secret-value");
   });
 
-  it("allows both together, which is what turns Google sign-in on", () => {
-    const env = parseEnv({ GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" });
-    expect(env.GOOGLE_CLIENT_ID).toBe("id");
-  });
-
-  /**
-   * Half a pair would show a "Googleでログイン" button that fails every
-   * attempt against Google with "invalid_client" — worse than one that never
-   * appears, since the operator sees nothing wrong until someone clicks it.
-   */
-  it.each(["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"])("refuses %s alone", (onlyThis) => {
-    expect(() => parseEnv({ [onlyThis]: "only-one-half" })).toThrow(/GOOGLE_CLIENT/);
-  });
-
-  it("trims whitespace pasted around DATABASE_AUTH_TOKEN and DATABASE_URL", () => {
-    const env = parseEnv({ DATABASE_URL: " file:./grape.db \n", DATABASE_AUTH_TOKEN: " a-token\n" });
-    expect(env.DATABASE_URL).toBe("file:./grape.db");
-    expect(env.DATABASE_AUTH_TOKEN).toBe("a-token");
+  /** A short secret is one someone typed as a placeholder, not one they generated. */
+  it("refuses an encryption key or cron secret shorter than 16 characters", () => {
+    expect(() => parseEnv({ GRAPE_ENCRYPTION_KEY: "short" })).toThrow(/GRAPE_ENCRYPTION_KEY/);
+    expect(() => parseEnv({ GRAPE_CRON_SECRET: "short" })).toThrow(/GRAPE_CRON_SECRET/);
   });
 });

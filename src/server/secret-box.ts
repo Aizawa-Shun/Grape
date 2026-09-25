@@ -1,37 +1,40 @@
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
 
 import { env } from "@/env";
-import { DEV_SECRET } from "@/server/session";
 
 /**
  * Encrypts values that have to come back out whole — a user's own Anthropic
  * or OpenAI-compatible API key, read every time Grape calls a model on their
- * behalf. Not for anything hashing already covers (passwords, invite codes):
- * those never need to be recovered, so a one-way hash is strictly better than
- * this wherever it applies. This is for the one case where it does not.
+ * behalf. Not for anything hashing already covers (invite codes): those never
+ * need to be recovered, so a one-way hash is strictly better wherever it
+ * applies. This is for the one case where it does not.
  *
- * Keyed off GRAPE_SESSION_SECRET rather than a secret of its own: a second
- * required env var earns its keep only if it protects against something the
- * first does not, and it would not here — anyone who can read
- * GRAPE_SESSION_SECRET can already forge a session for any account and reach
- * a plaintext key through the app itself. What this *does* protect against is
- * the threat core/settings/index.ts already names for every other secret: a
- * leaked database file, or a stolen backup, on its own. The DEV_SECRET
- * fallback is exactly as safe as session.ts's own use of it, for the same
- * reason — it only ever applies to a non-production build reached over
- * loopback.
+ * Keyed off GRAPE_ENCRYPTION_KEY, which lives in Secret Manager on App
+ * Hosting (apphosting.yaml) and never in Firestore. That separation is the
+ * point: someone who obtains a Firestore export — a leaked backup, a
+ * misconfigured rule — gets ciphertext, not working API keys.
+ *
+ * Outside production a fixed development key applies when none is set, so
+ * the emulators work with no setup; in production a missing key is an error
+ * at the first encryption, not a silent fallback.
  */
+const DEV_KEY = "grape-development-only-never-in-production";
+
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12;
 const TAG_LENGTH = 16;
 
 function appSecret(): string {
-  return env.GRAPE_SESSION_SECRET ?? DEV_SECRET;
+  if (env.GRAPE_ENCRYPTION_KEY) return env.GRAPE_ENCRYPTION_KEY;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("GRAPE_ENCRYPTION_KEY is not set; stored API keys cannot be encrypted or read.");
+  }
+  return DEV_KEY;
 }
 
 /**
  * scrypt exists in this call to turn an arbitrary-length secret into exactly
- * 32 bytes, not to stretch a low-entropy password — GRAPE_SESSION_SECRET
+ * 32 bytes, not to stretch a low-entropy password — GRAPE_ENCRYPTION_KEY
  * already carries whatever entropy there is, so a fixed salt is fine. The
  * salt string doubles as domain separation from anything else that might one
  * day derive a different key from the same secret.

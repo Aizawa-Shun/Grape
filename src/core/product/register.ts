@@ -1,5 +1,3 @@
-import { eq } from "drizzle-orm";
-
 import type { SaasAnalysis } from "@/core/context/analysis";
 import { analyzeSaas } from "@/core/context/analyze";
 import { crawlSite } from "@/core/context/crawl";
@@ -11,7 +9,7 @@ import {
   type ProductContextExtraction,
 } from "@/core/context/extract";
 import { getProvider, llmAvailable } from "@/core/llm";
-import { db, schema } from "@/db/client";
+import { db } from "@/db/client";
 import { normalizeUrl } from "@/core/context/crawl";
 import { describeError, log } from "@/server/log";
 import { describeForUser } from "@/server/http/errors";
@@ -77,18 +75,36 @@ export async function startProductSetup(input: {
 
   const name = input.name?.trim() || new URL(url).hostname;
 
-  const [product] = await db
-    .insert(schema.products)
-    .values({ url, name, userId: input.userId, setupStatus: "pending", setupError: null })
-    .onConflictDoUpdate({
-      target: [schema.products.userId, schema.products.url],
-      // A re-registration is a fresh attempt, so the row goes back to pending
-      // and drops whatever the previous attempt had to say about itself.
-      set: { name, setupStatus: "pending", setupError: null },
-    })
-    .returning();
+  // (userId, url) is unique — one account cannot register a site twice.
+  // Firestore has no unique index, so the lookup and the write share a
+  // transaction: two registrations of the same URL racing each other cannot
+  // both see "none yet" and both insert.
+  const productId = await db.runTransaction(async (tx) => {
+    const existing = await tx.products.first({
+      where: [
+        ["userId", "==", input.userId],
+        ["url", "==", url],
+      ],
+    });
+    if (existing) {
+      // A re-registration is a fresh attempt, so the row goes back to
+      // pending and drops whatever the previous attempt had to say about
+      // itself. The name is kept: it may be one someone chose on the review
+      // screen.
+      await tx.products.update(existing.id, { setupStatus: "pending", setupError: null });
+      return existing.id;
+    }
+    const created = await tx.products.insert({
+      url,
+      name,
+      userId: input.userId,
+      setupStatus: "pending",
+      setupError: null,
+    });
+    return created.id;
+  });
 
-  return { productId: product.id, url };
+  return { productId, url };
 }
 
 /**
@@ -102,14 +118,14 @@ export async function runProductSetup({ productId, url }: StartedProduct): Promi
   try {
     const pages = await crawlSite(url);
 
-    // crawl_pages is the current snapshot of the site, not a history: re-running
+    // crawlPages is the current snapshot of the site, not a history: re-running
     // registration on the same URL replaces it. Appending instead would list the
     // same page once per run in the UI and double-count it in any later audit.
-    // (product_contexts is the versioned table — see saveEditedContext.)
-    await db.delete(schema.crawlPages).where(eq(schema.crawlPages.productId, productId));
+    // (productContexts is the versioned collection — see saveEditedContext.)
+    await db.crawlPages.deleteWhere([["productId", "==", productId]]);
 
     for (const page of pages) {
-      await db.insert(schema.crawlPages).values({
+      await db.crawlPages.insert({
         productId,
         url: page.url,
         status: page.status,
@@ -123,7 +139,7 @@ export async function runProductSetup({ productId, url }: StartedProduct): Promi
     const { extraction, analysis } = await readSite(pages);
 
     const version = await nextContextVersion(productId);
-    await db.insert(schema.productContexts).values({
+    await db.productContexts.insert({
       productId,
       version,
       what: extraction.what,
@@ -143,17 +159,11 @@ export async function runProductSetup({ productId, url }: StartedProduct): Promi
     // itself, use that — but only while the name is still that placeholder, so
     // a name someone chose on the review screen is never overwritten by a
     // re-read.
-    const product = await db.query.products.findFirst({
-      where: eq(schema.products.id, productId),
-      columns: { name: true },
-    });
+    const product = await db.products.get(productId);
     const siteName = siteNameFrom(pages);
     const rename = siteName && product?.name === new URL(url).hostname ? { name: siteName } : {};
 
-    await db
-      .update(schema.products)
-      .set({ setupStatus: "ready", setupError: null, ...rename })
-      .where(eq(schema.products.id, productId));
+    await db.products.update(productId, { setupStatus: "ready", setupError: null, ...rename });
   } catch (error) {
     const shown = toAppError(error);
     const message = shown.hint ?? describeForUser(shown);
@@ -169,10 +179,7 @@ export async function runProductSetup({ productId, url }: StartedProduct): Promi
     // from an earlier run, and one failed re-crawl must not discard it — so
     // the error is recorded alongside the old context rather than in place of
     // it, and the page shows both.
-    await db
-      .update(schema.products)
-      .set({ setupStatus: "failed", setupError: message })
-      .where(eq(schema.products.id, productId));
+    await db.products.update(productId, { setupStatus: "failed", setupError: message });
   }
 }
 
@@ -211,9 +218,6 @@ async function readSite(
 }
 
 async function nextContextVersion(productId: string): Promise<number> {
-  const existing = await db.query.productContexts.findMany({
-    where: eq(schema.productContexts.productId, productId),
-    columns: { version: true },
-  });
+  const existing = await db.productContexts.find({ where: [["productId", "==", productId]] });
   return existing.reduce((max, row) => Math.max(max, row.version), 0) + 1;
 }

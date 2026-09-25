@@ -1,14 +1,30 @@
 "use client";
 
+import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import { clientAuth, describeFirebaseError, establishSession } from "@/components/auth/firebase-client";
 import { Button } from "@/components/ui/button";
 import { Field, controlClass } from "@/components/ui/field";
 import { Status } from "@/components/ui/status";
 import { MIN_PASSWORD_LENGTH } from "@/core/auth/policy";
+import type { ClientAuthSettings } from "@/server/auth/firebase-web";
 
-export function RegisterForm({ first, code }: { first: boolean; code: string }) {
+/**
+ * Creates the Firebase account, then asks Grape to let it in. If Grape
+ * refuses — no invite, or one that has been used — the session endpoint
+ * deletes the account it just created, so nothing is left behind.
+ */
+export function RegisterForm({
+  first,
+  code,
+  settings,
+}: {
+  first: boolean;
+  code: string;
+  settings: ClientAuthSettings;
+}) {
   const router = useRouter();
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
@@ -28,24 +44,20 @@ export function RegisterForm({ first, code }: { first: boolean; code: string }) 
     setError(null);
 
     startTransition(async () => {
-      const response = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          displayName,
-          email,
-          password,
-          ...(first ? {} : { code: inviteCode.trim() }),
-        }),
-      });
-      const body = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        setError(body.error ?? "登録できませんでした。");
-        return;
+      const auth = clientAuth(settings);
+      try {
+        const { user } = await createUserWithEmailAndPassword(auth, email.trim(), password);
+        await updateProfile(user, { displayName: displayName.trim() });
+        const failure = await establishSession(auth, user, first ? undefined : inviteCode.trim());
+        if (failure) {
+          setError(failure);
+          return;
+        }
+        router.replace("/");
+        router.refresh();
+      } catch (caught) {
+        setError(describeFirebaseError(caught));
       }
-      router.replace("/");
-      router.refresh();
     });
   }
 
@@ -77,10 +89,7 @@ export function RegisterForm({ first, code }: { first: boolean; code: string }) 
         )}
       </Field>
 
-      <Field
-        label="パスワード"
-        hint={`${MIN_PASSWORD_LENGTH}文字以上。記号の混在より長さのほうが効きます。`}
-      >
+      <Field label="パスワード" hint={`${MIN_PASSWORD_LENGTH}文字以上。`}>
         {(props) => (
           <input
             {...props}
@@ -94,11 +103,10 @@ export function RegisterForm({ first, code }: { first: boolean; code: string }) 
       </Field>
 
       {!first && (
-        <Field label="招待コード">
+        <Field label="招待コード" hint="招待リンクから開いた場合は入力済みです。">
           {(props) => (
             <input
               {...props}
-              autoComplete="off"
               value={inviteCode}
               onChange={(e) => setInviteCode(e.target.value)}
               className={controlClass}

@@ -1,10 +1,8 @@
-import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { AppError } from "@/core/errors";
+import { deleteProduct } from "@/core/product/delete";
 import { updateProduct } from "@/core/product/update";
-import { db, schema } from "@/db/client";
 import { requireUserId } from "@/server/auth/current-user";
 import { route } from "@/server/http/route";
 
@@ -28,10 +26,8 @@ export const PATCH = route(
 );
 
 /**
- * Removes a product and everything reasoned from it — crawl pages, contexts,
- * diagnoses, tasks — via the cascades declared in schema.ts. `llm_calls` is the
- * one exception (ON DELETE SET NULL): a past call keeping its cost on the
- * books after the product it was for is gone is the point, not a bug.
+ * Removes a product and everything reasoned from it — see
+ * core/product/delete.ts for what that covers and why LLM calls stay.
  *
  * The only way to clear a product Grape could never read: registration used
  * to leave a row with no context behind on a crawl or extraction failure, with
@@ -42,13 +38,7 @@ export const DELETE = route(
   async (_request: Request, { params }: { params: Promise<{ id: string }> }) => {
     const { id } = await params;
 
-    const [deleted] = await db
-      .delete(schema.products)
-      .where(and(eq(schema.products.id, id), eq(schema.products.userId, requireUserId())))
-      .returning({ id: schema.products.id });
-
-    if (!deleted) throw new AppError("NOT_FOUND", `No product ${id} for this account`);
-
+    await deleteProduct(id, requireUserId());
     return new NextResponse(null, { status: 204 });
   },
 );
