@@ -16,9 +16,6 @@ jobs:
         # (jsdom 30 did) pass CI and break the machine the code is written on.
         node: [20, 22]
     env:
-      # Every value here has a default in src/env.ts, but pinning them keeps CI
-      # from silently depending on whatever the defaults happen to be.
-      DATABASE_URL: file:./ci.db
       # AI is opt-in and each account brings its own API key (see env.ts), so
       # CI simply runs with none configured — nothing in this job
       # calls a model, and the tests that exercise LLM-dependent code mock the
@@ -44,11 +41,15 @@ jobs:
 
       - run: pnpm typecheck
 
-      - run: pnpm test
+      # The Firestore and Auth emulators run on Java. With them up, the store
+      # contract test (src/db/store/contract.test.ts) holds the in-memory
+      # store and real Firestore to the same behaviour — the check that every
+      # other test's in-memory store is telling the truth.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
 
-      # Also proves the migrations still apply to an empty database, which is
-      # the one thing no unit test covers and the one thing a bad migration
-      # breaks for everyone who pulls.
-      - run: pnpm db:migrate
+      - run: pnpm test:emulators
 
       - run: pnpm build

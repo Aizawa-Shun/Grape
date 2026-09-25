@@ -7,7 +7,7 @@ import { loadSettings } from "@/core/settings";
  * `pnpm loop:tick` — one turn of the scheduled loop, by hand.
  *
  * The same thing POST /api/cron/tick does, for a machine that can run a
- * command on a timer (a crontab line, a Render cron job running this repo)
+ * command on a timer (a crontab line on a machine with Firestore credentials)
  * rather than send an authenticated request. Prints the result as JSON and
  * exits non-zero only if something was attempted and failed.
  *

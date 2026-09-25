@@ -46,7 +46,7 @@ const UTM_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_c
 
 const CollectInputSchema = z.object({
   // Ids are crypto.randomUUID(), so this is exact and turns most junk traffic
-  // away before it reaches SQLite.
+  // away before it reaches Firestore.
   productId: z.uuid(),
   anonId: z.string().min(1).max(200),
   sessionId: z.string().min(1).max(200),

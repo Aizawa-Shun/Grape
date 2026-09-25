@@ -8,7 +8,7 @@ import { env, parseEnv, type Env } from "@/env";
  * The whole layer exists because `.env` cannot be edited usefully at runtime:
  * `parseEnv(process.env)` runs once at import, so writing that file would show
  * a save that changed nothing until the next restart. Storing the override in
- * SQLite and merging it means a change takes effect on the next request.
+ * Firestore and merging it means a change takes effect on the next request.
  *
  * Validation is not reimplemented here. The effective configuration is
  * `parseEnv({ ...process.env, ...overrides })`, so every rule the env schema
@@ -21,10 +21,12 @@ import { env, parseEnv, type Env } from "@/env";
 /**
  * What is *not* here matters as much as what is.
  *
- * - Secrets (API keys, the admin password, the X credentials) stay in .env so
+ * - Secrets (the encryption key, the cron secret, the X credentials) stay in
+ *   the environment (App Hosting secrets, or .env locally) so
  *   that an auth bypass on a tunnel-exposed instance cannot read or rewrite
  *   them, and so they never sit in a database that gets exported or backed up.
- * - DATABASE_URL cannot be here: it is what this table is read from.
+ * - Where the database is cannot be here: it is what this collection is read
+ *   from.
  *
  * GRAPE_ACTION_DRY_RUN *is* here, as the one deliberate exception to "settings
  * that cost nothing to get wrong". Posting to X is irreversible and metered,
@@ -115,7 +117,7 @@ export async function reloadSettings(database?: Database): Promise<Env> {
     // A stored override can only become invalid if .env changed underneath it
     // — a key removed, say. Falling back to env keeps the app bootable and
     // keeps the settings screen reachable, which is the only way back that
-    // does not involve opening SQLite by hand.
+    // does not involve editing Firestore by hand.
     cache = env;
     overrideCache = {};
     throw new AppError("INTERNAL", "Stored settings are no longer valid; falling back to .env", {
@@ -130,7 +132,7 @@ export async function reloadSettings(database?: Database): Promise<Env> {
  * The overridable values only, as strings.
  *
  * Exists so that nothing can hand the whole `Env` object to a client: it also
- * carries the API keys, the admin password and the X credentials, and the
+ * carries the encryption key, the cron secret and the X credentials, and the
  * entire reason those are excluded from this layer is that they should never
  * leave the file they are configured in.
  */

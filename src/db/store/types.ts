@@ -64,7 +64,7 @@ export interface Collection<T extends { id: string }, D extends keyof T = never>
 export interface Defaults {
   users: "role" | "anthropicApiKey" | "openaiApiKey" | "createdAt" | "lastLoginAt";
   invites: "invitedBy" | "usedAt" | "usedBy" | "createdAt";
-  products: "keyEventName" | "setupStatus" | "setupError" | "createdAt";
+  products: "keyEventName" | "setupStatus" | "setupError" | "setupClaimedAt" | "createdAt";
   productContexts: "confidence" | "gaps" | "analysis" | "primaryLanguage" | "editedByHuman" | "createdAt";
   crawlPages: "title" | "text" | "meta" | "renderedWith" | "fetchedAt";
   events: "path" | "referrer" | "utm";
@@ -106,7 +106,7 @@ export function defaultsFor(name: CollectionName, now: Date): Record<string, unk
     case "invites":
       return { invitedBy: null, usedAt: null, usedBy: null, createdAt: now };
     case "products":
-      return { keyEventName: null, setupStatus: "ready", setupError: null, createdAt: now };
+      return { keyEventName: null, setupStatus: "ready", setupError: null, setupClaimedAt: null, createdAt: now };
     case "productContexts":
       return {
         confidence: null,

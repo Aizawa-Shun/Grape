@@ -6,7 +6,9 @@ LLMのおかげでWebサービスは一人でも作れるようになりまし�
 マーケティングの知識も時間もない、という人のために作っています。
 専門用語は使いません。画面に出るのは「どこで人が離れているか」と「次に何をするか」だけです。
 
-一人で使う前提で、自分のパソコン上で動きます。認証もデータベースサーバーも要りません。
+Firebase の上で動きます。データは Firestore、ログインは Firebase Authentication、
+画面とAPIは App Hosting、週ごとの定期実行は Cloud Functions です。手元では
+Firebase のエミュレーターで、同じものがそのまま動きます。
 
 ## 何をするか
 
@@ -34,14 +36,23 @@ AIは「なぜそうなっているか」を書くところにしか使いませ
 「根拠を見る」を開くと、参照したページ・引用した文・そう判断した理由が出ます。
 AIの推定を事実として見せないための作りです。
 
-## はじめかた
+## はじめかた（手元で動かす）
+
+必要なもの: Node 22 以上、pnpm、Java 11 以上（Firebase エミュレーターが使います）。
 
 ```bash
 pnpm install
 cp .env.example .env      # そのままでも動きます
-pnpm db:migrate           # データベースを作る
-pnpm dev                  # http://localhost:3000
+pnpm dev:emulators        # http://localhost:3000 （エミュレーターの画面は :4000）
 ```
+
+`dev:emulators` は Firestore と Authentication のエミュレーターを立ち上げてから
+`next dev` を動かします。Firebase のプロジェクトもアカウントも要りません。データは
+エミュレーターを止めると消えます。
+
+最初に `/register` でアカウントを作った人がオーナーになり、以降の登録は招待制です。
+エミュレーターではメールが実際には送られないので、パスワード再設定のリンクは
+エミュレーターの画面（http://localhost:4000 の Authentication）に出ます。
 
 **AIは既定でオフです。** `.env` の `LLM_PROVIDER` を設定するまで、診断のコメントや
 投稿文面の生成といったAI機能は使えません（プロダクト理解だけは、AIが無くても
@@ -53,7 +64,7 @@ pnpm dev                  # http://localhost:3000
 - `openai-compat` — OpenAI / LM Studio / vLLM / llama.cpp など。`OPENAI_BASE_URL`
   が `localhost` ならキー不要、それ以外は各自 `/account` にキーが要ります
 
-### サイトから訪問を届けるには
+### 手元からサイトの訪問を届けるには
 
 計測用のコードはあなたのサイト（インターネット上）で動くので、
 `http://localhost:3000` には届きません。公開アドレスが要ります。
@@ -63,82 +74,139 @@ pnpm tunnel               # https://....trycloudflare.com が表示されます
 ```
 
 表示されたアドレスを設定画面（`/settings` の「訪問データの受け取り先」）に貼って保存します。
-設定はSQLiteに入るので、サーバーの再起動は要りません。
-アドレスはトンネルを開き直すたびに変わるので、Grapeは毎回その場でコードを作り直します。
+再起動は要りません。アドレスはトンネルを開き直すたびに変わるので、Grapeは毎回
+その場でコードを作り直します。
 
-> **トンネルを開くと、ダッシュボード全体もインターネットから見えます。**
-> `GRAPE_SESSION_SECRET` を設定していない場合、Grapeは localhost 以外からのアクセスを
-> 503で断ります。トンネルを使うなら設定してください。設定したうえで最初に開いた人が
-> オーナーのアカウントを作り、以降の登録は招待制になります。
->
-> ただし `/api/collect` と `/g.js` は公開経路なので、パスワードを設定しなくても
-> **計測データは届きます**。塞がるのはダッシュボード本体だけです。
+> **トンネルを開くと、ダッシュボードもインターネットから見えます。** ログインしないと
+> 何も見られませんが、アカウントが1つも無いうちは最初に開いた人がオーナーになれます。
+> トンネルを開く前に自分のアカウントを作っておいてください。
+> `/api/collect` と `/g.js` は計測用の公開経路なので、ログイン無しで届きます。
 
-## オンラインに置く（Render）
+## Firebase にデプロイする
 
 トンネルは開き直すたびにアドレスが変わり、パソコンを閉じれば止まります。
-常時動かすなら Render に置きます。`render.yaml` がそのための設定です。
+常時動かすなら Firebase に置きます。設定は `firebase.json`・`apphosting.yaml`・
+`firestore.rules`・`firestore.indexes.json`・`functions/` にすべて入っています。
 
-**データベースは Turso です。** Render 自体のディスクは有料で、しかもサービスを
-作り直すと消えます。Turso は無料枠があり、ドライバも今と同じ `@libsql/client` な
-ので、データ層は書き換えません。Render の無料プランがそのまま使えます。
+| 部分 | 使うもの |
+|---|---|
+| 画面・API・計測の受け口 | App Hosting（Next.js をそのまま動かす） |
+| データ | Cloud Firestore |
+| ログイン | Firebase Authentication（メール・パスワード、Google） |
+| 週ごとのループ | Cloud Functions の定期実行（Cloud Scheduler） |
+| 暗号鍵などの秘密の値 | Cloud Secret Manager |
 
-1. [turso.tech](https://turso.tech) でアカウントを作り（GitHubログイン可）、
-   データベースをひとつ作る
-2. その接続情報を控える
-   ```bash
-   turso db show <データベース名>          # → DATABASE_URL（libsql://...）
-   turso db tokens create <データベース名>  # → DATABASE_AUTH_TOKEN
-   ```
-   CLIが無ければ、ダッシュボードの Connect 画面からも同じ2つの値が見られます。
-3. GitHub（または GitLab）にリポジトリを作って push する
-4. Render で **New → Blueprint** を選び、そのリポジトリを指定する
-5. 訊かれる値を入れる
-   - `DATABASE_URL` — 手順2の `libsql://...`
-   - `DATABASE_AUTH_TOKEN` — 手順2のトークン
-   - `GRAPE_SESSION_SECRET` — **必須**。これが無いと、公開URLからは全部503になります
-     （Renderが自動生成するので、そのままで構いません）
-   - `LLM_PROVIDER` は空のままでも構いません。AIは既定でオフで、後から設定できます
-     （下記「AIを使えるようにする」を参照）。APIキーはRender側の環境変数ではなく、
-     各自が `/account` で設定します
-6. 初回デプロイ後、割り当てられた `https://....onrender.com` を開いて、
-   **最初のアカウントを作る**（先に開いた人がオーナーになります）
-7. `/settings` の「計測用のコード」をコピーして、自分のサイトに貼る
+App Hosting と Cloud Functions を使うので、プロジェクトは **Blaze（従量課金）プラン**
+にする必要があります。一人で使う程度なら、ほぼ無料枠に収まります。
 
-「訪問データの受け取り先」を入力する必要はありません。Render は自分の公開URLを
-`RENDER_EXTERNAL_URL` として渡してくるので、Grape はそれを既定の受け取り先に
-します。独自ドメインを使うときだけ `/settings` から上書きしてください
-（再デプロイは不要です）。
+### 1. Firebase プロジェクトを用意する（コンソールで一度だけ）
 
-以降、このアドレスは変わりません。`pnpm tunnel` も、パソコンを開けておくことも
-不要になります。Render 上の1サービスだけで完結します。
+1. [Firebase コンソール](https://console.firebase.google.com/) でプロジェクトを作り、
+   Blaze プランにする
+2. **Firestore Database** を作る（ネイティブモード、ロケーションは例えば `asia-northeast1`）
+3. **Authentication** を開始し、ログイン方法で **メール / パスワード** と **Google** を
+   有効にする
+4. **App Hosting** でバックエンドを作る。バックエンドIDは `grape`、リージョンは
+   お好みで。GitHub リポジトリをつなぐと、push のたびに自動でデプロイされます
+   （つながずに、手元から下記の `firebase deploy` で上げることもできます）。
+   ウェブアプリも一緒に作られ、その設定（`FIREBASE_WEBAPP_CONFIG`）は
+   App Hosting が自動で渡すので、入力は要りません
 
-**デプロイしたら、まず自分でアカウントを作ってください。** 登録画面は
-アカウントが1つも無い間だけ開いていて、最初の登録で閉じます。放置した公開URLを
-先に見つけた人がオーナーになれてしまうので、デプロイ直後にやるべき唯一の作業です。
+### 2. 手元の準備
 
-### 週ごとのループを自動で回す
+```bash
+npm install -g firebase-tools        # または pnpm dlx firebase-tools
+firebase login
+firebase use --add                   # 手順1のプロジェクトを選ぶ
+```
 
-何もしなければ、効果の測定（「効果を測る」）も診断のやり直し（「調べ直す」）も、
-画面で押したときにだけ動きます。定期実行を設定すると、1日1回次の2つを自動で行います。
+### 3. 秘密の値を登録する
 
+```bash
+firebase apphosting:secrets:set GRAPE_ENCRYPTION_KEY
+firebase apphosting:secrets:set GRAPE_CRON_SECRET
+```
+
+それぞれ値を訊かれるので、長いランダムな値を入れてください
+（`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`）。
+「バックエンドにアクセスを許可するか」と訊かれたら `grape` を許可します。
+
+- `GRAPE_ENCRYPTION_KEY` — 各自のAI APIキーを Firestore に暗号化して保存する鍵。
+  **後から変えると、保存済みのAPIキーはすべて読めなくなります**（各自が入れ直せば直ります）
+- `GRAPE_CRON_SECRET` — 定期実行が `/api/cron/tick` を呼ぶときの合言葉。
+  Cloud Functions 側にはデプロイ時に自動でアクセス権が付きます
+
+値をこのチャットや Issue などに貼る必要はありません。Secret Manager にだけ置かれます。
+
+### 4. デプロイする
+
+```bash
+firebase deploy --only firestore,apphosting
+```
+
+終わると `https://grape--<プロジェクトID>.<リージョン>.hosted.app` のような
+アドレスが出ます。続けて、定期実行を上げます。
+
+```bash
+firebase deploy --only functions
+```
+
+初回は `GRAPE_URL` を訊かれるので、上のアドレスを入れてください
+（`functions/.env.<プロジェクトID>` に保存され、次からは訊かれません）。
+
+### 5. デプロイ直後にやること
+
+1. Authentication → 設定 → **承認済みドメイン** に、手順4のアドレスのホスト名
+   （`grape--....hosted.app`）を追加する。これが無いと Google ログインが失敗します
+2. そのアドレスを開いて、**すぐに自分のアカウントを作る**。登録画面はアカウントが
+   1つも無い間だけ開いていて、最初の1人がオーナーになります。放置した公開URLを
+   先に見つけた人がオーナーになれてしまうので、ここは後回しにしないでください
+3. サービスを登録し、`/settings` の「計測用のコード」を自分のサイトに貼る
+
+「訪問データの受け取り先」は入力しなくても、開いているアドレスがそのまま使われます。
+独自ドメインを使うときだけ `/settings` から上書きしてください（再デプロイ不要）。
+
+`apphosting.yaml` の既定は、インスタンス0〜2台、メモリ1GiBです。放置すると0台まで
+下がって費用がかからなくなる代わりに、放置後の最初のアクセスは数秒遅くなります。
+
+### 週ごとのループ
+
+デプロイした時点で、`functions/index.js` の `weeklyLoop` が毎日 09:30（日本時間）に
+`POST /api/cron/tick` を呼びます。そこで次のことを行います。
+
+- 読み込み途中で止まったサービスの読み込みを終わらせる
 - 完了から7日たったタスクの効果を測る（計算だけで、AIもお金も使いません）
 - 最後の診断から1週間たったサービスを診断し直す（そのサービスの持ち主のAPIキーと、
   持ち主の月の上限額の範囲で動きます。キーが無い・上限に達した人のサービスは飛ばします）
 
 初めての診断は自動では行いません。文面の作成・投稿の実行も、今までどおり人が押したときだけです。
+すぐに1回回したいときは、Google Cloud コンソールの Cloud Scheduler から
+`firebase-schedule-weeklyLoop-...` を「強制実行」します。
 
-設定は2つです。
+### クライアント描画のサイトを読む
 
-1. Render の `GRAPE_CRON_SECRET` を確認する（Blueprint が自動で作っています。
-   Render 以外なら `.env` に16文字以上のランダムな値を入れる）
-2. GitHub リポジトリの Settings → Secrets and variables → Actions に次の2つを登録する
-   - `GRAPE_URL` — `https://....onrender.com`
-   - `GRAPE_CRON_SECRET` — 手順1の値
+JavaScript で描画されるサイトは、ブラウザ（Chromium）で開いて読みます。App Hosting
+上では `@sparticuz/chromium` が同梱されたものを使うので、追加の設定は要りません。
+手元では Playwright のもの（`npx playwright install chromium`）を使います。どちらも
+使えないときは警告を1回出して静的な読み取りに切り替わるので、止まりはしません。
 
-これで `.github/workflows/loop.yml` が毎日 09:30（日本時間）に `POST /api/cron/tick`
-を呼びます。Actions の画面から手動でも実行できます。自分のサーバーで動かすなら、
-cron などから `pnpm loop:tick` を実行しても同じことが起きます。
+### 以前の SQLite 版から移す
+
+Turso / SQLite で動かしていたときのデータは、Firestore にそのまま移せます。
+
+```bash
+gcloud auth application-default login
+FIREBASE_PROJECT_ID=<プロジェクトID> \
+  pnpm db:import-sqlite ./grape.db --owner-email you@example.com
+```
+
+先に新しい Grape で、そのメールアドレスのアカウントを作っておいてください。
+他の人の分は、同じメールアドレスで Firebase にアカウントがあればその人に、
+無ければ `--owner-email` の人に付け替えます。パスワードと招待は移りません
+（Firebase に一から作り直すものなので）。保存していたAI APIキーは、以前の
+`GRAPE_SESSION_SECRET` を `--old-session-secret` に渡したときだけ移ります。
+渡さなければ、各自が `/account` で入れ直します。Turso にある場合は、先に
+`turso db shell <名前> .dump | sqlite3 grape.db` で手元に落としてください。
 
 ### AIを使えるようにする
 
@@ -146,76 +214,33 @@ AIは既定でオフです。プロダクト理解（何を・誰に・なぜ・
 サイトのmeta descriptionやタイトルをそのまま整理する形で動きますが、診断の
 コメントや投稿文面の生成はAIを設定するまで使えません。
 
-まず、どのサービスを使うか選びます。Render の Environment（または `.env`）に
-設定するのは、これ一つだけです。
+どのサービスを使うかを `LLM_PROVIDER` で選びます。デプロイ先では
+`apphosting.yaml`（既定は `anthropic`）、手元では `.env`、どちらも `/settings` から
+変えられます（再起動・再デプロイ不要）。
 
 ```bash
-LLM_PROVIDER=anthropic
+LLM_PROVIDER=anthropic       # または openai-compat
 ```
-
-`openai-compat`（OpenAI本体やLM Studioなど）を使う場合は、代わりに
-`LLM_PROVIDER=openai-compat` を設定します。
 
 APIキーはここには置きません。使う人それぞれが、サインイン後に `/account` の
 「AIのAPIキー」から自分のキーを設定します。ひとつの Grape を複数人で使っていても、
 誰がどれだけAI呼び出しにお金を使ったかは各自の `/settings` の見積り上限と `/usage`
 に、自分の分だけが出ます。
 
-### Googleでログインできるようにする
+### ログイン・人を増やす・パスワードを忘れた
 
-メール・パスワードに加えて、Googleアカウントでのログインも使えます。デフォルトでは
-無効で、以下の2つを設定した時だけ、`/login` と `/register` に「Googleでログイン」
-ボタンが出ます。
+ログインはメール・パスワードか Google アカウントです（Firebase Authentication の
+ログイン方法で有効にしたものが使えます）。どちらでも招待制のルールは同じで、
+アカウントが0件のときの最初の1人はオーナーになり、それ以降は招待コードが要ります。
 
-1. [Google Cloud Console](https://console.cloud.google.com/apis/credentials) で
-   OAuthクライアント（種類は「ウェブ アプリケーション」）を作る
-2. **承認済みのリダイレクトURI** に、使う環境の分だけ追加する
-   - `http://localhost:3000/api/auth/google/callback`（`pnpm dev` 用）
-   - `https://<デプロイ先のホスト>/api/auth/google/callback`
-3. 発行された値を設定する
-   ```bash
-   GOOGLE_CLIENT_ID=...
-   GOOGLE_CLIENT_SECRET=...
-   ```
+2人目以降はオーナーが **招待**（`/invites`）から発行するリンクを渡してください。
+メール送信機能は無いので、渡すのはあなたの仕事です。リンクは発行した直後の一度しか
+表示されません（保存しているのはハッシュだけなので、あとから読み直すことはできません）。
 
-招待制のルールはGoogleログインでも同じです。アカウントが0件のときの最初の1人は
-オーナーになり、それ以降は招待リンクが要ります。すでにメール・パスワードで
-登録している人が、同じメールアドレスのGoogleアカウントでログインすると、
-新しいアカウントを作らず、その人の既存アカウントにそのままつながります。
-
-Renderに置いている場合は、ダッシュボードの **Environment** から同じ2つを
-追加してください（`render.yaml` には含めていません。使わない人にまで
-入力を求める項目にしたくなかったためです）。
-
-### 人を増やす / パスワードを忘れた
-
-2人目以降はオーナーが発行する招待リンクが要ります。アカウントメニューの
-**招待** から発行してください。メール送信機能は無いので、出てきたリンクを渡すのは
-あなたの仕事です。リンクは発行した直後の一度しか表示されません（保存しているのは
-ハッシュだけなので、あとから読み直すことはできません）。
-
-表示名・メールアドレス・パスワードの変更は、同じメニューの **アカウント** から
-できます。**AI利用料** では、今月使ったAIの見積り額と、その内訳が見られます。
-
-パスワードを*忘れた*ときだけは、サーバーのシェルから直します。メールが送れない
-以上、これが唯一の復旧手段です:
-
-```bash
-pnpm db:reset-password you@example.com '新しいパスワード'
-```
-
-`render.yaml` は無料プランを指定しています。データベースが Render の外（Turso）
-にあるので、放置してインスタンスが止まっても、次のアクセスで起き直すだけでデータは
-消えません。ただし放置後の最初のアクセスは、起き直す分だけ数秒〜十数秒遅くなります。
-待たせたくない場合は Render のプランを有料に上げてください。
-
-> **AIを使うなら `anthropic` か `openai-compat` を Render 側でも設定してください。**
-> ローカルの `.env` の設定はサーバーには引き継がれません。
-
-> **クライアント描画のサイトは読めなくなる場合があります。** Chromium は
-> Render の標準ランタイムには入っていません。読めない場合は警告を1回出して
-> 静的な読み取りに切り替わるので、止まりはしません。
-> 必要になったら Docker ランタイムに切り替えて Chromium を入れます。
+表示名の変更と、パスワード再設定メールの送信は **アカウント**（`/account`）から
+できます。パスワードを忘れたときは、ログイン画面の「パスワードを忘れた」から
+再設定メールを受け取ります。**AI利用料**（`/usage`）では、今月使ったAIの見積り額と、
+その内訳が見られます。
 
 ## 外部への投稿について
 
@@ -231,39 +256,31 @@ Xへの投稿は取り消せず、実費もかかります（1投稿およそ$0.
 
 | したいこと | コマンド |
 |---|---|
-| 開発サーバーを動かす | `pnpm dev` |
-| 本番相当で動かす | `pnpm build && pnpm start` |
+| 開発サーバーを動かす | `pnpm dev:emulators` |
 | 型・書式・テストを全部見る | `pnpm typecheck && pnpm lint && pnpm test` |
-| バックアップを取る | `pnpm db:backup` |
+| Firestore を使うテストも含めて見る | `pnpm test:emulators` |
+| デプロイする | `firebase deploy --only firestore,apphosting,functions` |
 | 古い訪問データを消す | `pnpm db:prune` |
 | 週ごとのループを1回だけ回す | `pnpm loop:tick` |
-| 状態を確認する | `curl localhost:3000/api/health` |
+| 状態を確認する | `curl <アドレス>/api/health` |
 
-### バックアップと復元
+`db:prune` と `loop:tick` は、実行した環境が指す Firestore に対して動きます
+（エミュレーターなら `FIRESTORE_EMULATOR_HOST`、本番なら `FIREBASE_PROJECT_ID` と
+`gcloud auth application-default login`）。
 
-```bash
-pnpm db:backup
-```
+### バックアップ
 
-`backups/` に日時つきのファイルができます（新しい14個を残して古いものは消えます）。
-サーバーを止めずに取れる、中身の整合した写しです。
+Firestore のバックアップは Google Cloud 側の機能を使います。Firestore の
+「障害復旧」から日次・週次のバックアップのスケジュールを作るか、
+`gcloud firestore export gs://<バケット>` で書き出してください。
 
-復元は3手順です。
+### データの形を変える
 
-1. サーバーを止める
-2. `backups/grape-YYYYMMDD-HHMMSS.db` を `grape.db` に上書きコピーする
-3. `grape.db-wal` と `grape.db-shm` があれば消して、サーバーを起動し直す
-
-### データベースの変更
-
-```bash
-pnpm db:generate    # schema.ts の変更から SQL を作る
-#                     drizzle/ にできた .sql を目で確認してから↓
-pnpm db:migrate     # 適用する
-```
-
-`drizzle/` の中身は手で書き換えないでください。適用済みの内容と食い違うと、
-`/api/health` が「食い違っています」と言って止まります（それが分かるように入れてあります）。
+データの形は `src/db/schema.ts` にあり、Firestore にはマイグレーションがありません。
+新しい項目は `src/db/store/types.ts` の既定値で埋まるので、既存のドキュメントを
+書き換える必要はありません。項目の絞り込みと並べ替えを組み合わせるクエリを足したら、
+`firestore.indexes.json` に索引を足してください（エミュレーターは索引が無くても
+通してしまうので、ここは目で確認します）。
 
 ## つくり
 
@@ -279,7 +296,8 @@ src/
     llm/          AI接続先の差し替え可能な層
     net/          外部へのアクセスの防御
   server/         ログ・認証・流量制限・HTTPの共通処理
-  db/             スキーマとマイグレーション
+  db/             データの形と、Firestore / メモリの保存層
+functions/        週ごとのループを呼ぶ定期実行（Cloud Functions）
 public/g.js       サイトに貼る計測用コード
 ```
 
@@ -288,6 +306,5 @@ AIの接続先を差し替えても、`src/core/llm/` の外は一行も変わ�
 
 ## 動作環境
 
-Node 20 以上、pnpm。データベースはSQLiteのファイルが1つできるだけです。
-クライアント側でしか描画されないサイトを読むときだけChromiumを使います
-（`npx playwright install chromium`。入っていなくても、静的なサイトは普通に読めます）。
+Node 22 以上、pnpm。手元で動かすときは Firebase エミュレーターのために Java 11 以上。
+デプロイ先は Firebase（Blaze プラン）です。

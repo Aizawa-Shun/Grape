@@ -52,7 +52,7 @@ export default async function ReviewProductPage({ params }: { params: Promise<{ 
     return (
       <Page>
         {header}
-        <SetupProgress url={product.url} />
+        <SetupProgress productId={product.id} url={product.url} />
       </Page>
     );
   }

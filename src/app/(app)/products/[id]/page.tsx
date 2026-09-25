@@ -94,12 +94,12 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
 
       {product.setupStatus === "pending" && !latest && (
         <Section title="このサービスについて">
-          <SetupProgress url={product.url} />
+          <SetupProgress productId={product.id} url={product.url} />
         </Section>
       )}
 
       {product.setupStatus === "pending" && latest && (
-        <SetupProgress url={product.url} compact />
+        <SetupProgress productId={product.id} url={product.url} compact />
       )}
 
       {/*

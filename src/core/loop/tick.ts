@@ -4,6 +4,7 @@ import { DEFAULT_WINDOW_DAYS, evaluateOutcome } from "@/core/intelligence/outcom
 import { recommendTasks } from "@/core/intelligence/recommend";
 import { llmAvailable } from "@/core/llm";
 import { DIAGNOSIS_STALE_DAYS } from "@/core/product/next-step";
+import { claimProductSetup, runProductSetup, type StartedProduct } from "@/core/product/register";
 import { db, type Database } from "@/db/client";
 import { by, firstBy } from "@/db/sort";
 import { runInRequestScope } from "@/server/context";
@@ -11,9 +12,10 @@ import { describeError, log } from "@/server/log";
 
 /**
  * One turn of the weekly loop, run on a schedule rather than by a person.
+ * (It also finishes any product setup left pending — see step 0.)
  *
  * README step 6 — "7日後に効果を測り、その結果が次の診断に入ります" — and
- * render.yaml's "scheduled loop" both described this, and nothing did it: the
+ * the old deploy config's "scheduled loop" both described this, and nothing did it: the
  * outcome of a task was measured only if someone came back and pressed 測る,
  * and a product was re-diagnosed only if someone pressed 調べ直す. Two jobs:
  *
@@ -39,6 +41,8 @@ import { describeError, log } from "@/server/log";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface LoopTickResult {
+  /** Pending product setups this tick finished, whose own request never ran or died. */
+  setUp: number;
   measured: number;
   diagnosed: number;
   /** Not attempted, and why — expected states, not errors. */
@@ -54,6 +58,8 @@ export interface LoopTickOptions {
   measure?: (taskId: string, now: Date) => Promise<unknown>;
   /** Injectable for the same reason; runs inside the owner's request scope. */
   rediagnose?: (productId: string) => Promise<unknown>;
+  /** Injectable for the same reason; runs inside the owner's request scope. */
+  setUp?: (claim: StartedProduct) => Promise<unknown>;
 }
 
 async function defaultRediagnose(productId: string): Promise<void> {
@@ -72,12 +78,19 @@ export async function runLoopTick(options: LoopTickOptions = {}): Promise<LoopTi
   // per process; a cross-process overlap is harmless for measuring, and the
   // staleness check below makes a double diagnosis a narrow race at worst.
   if (running) {
-    return { measured: 0, diagnosed: 0, skipped: [{ productId: "*", reason: "already running" }], failed: [] };
+    return {
+      setUp: 0,
+      measured: 0,
+      diagnosed: 0,
+      skipped: [{ productId: "*", reason: "already running" }],
+      failed: [],
+    };
   }
   running = true;
   try {
     const result = await tick(options);
     log.info("loop.tick", {
+      setUp: result.setUp,
       measured: result.measured,
       diagnosed: result.diagnosed,
       skipped: result.skipped.length,
@@ -95,8 +108,27 @@ async function tick(options: LoopTickOptions): Promise<LoopTickResult> {
   const measure =
     options.measure ?? ((taskId: string, at: Date) => evaluateOutcome(taskId, { now: at, database: conn }));
   const rediagnose = options.rediagnose ?? defaultRediagnose;
+  const setUp = options.setUp ?? runProductSetup;
 
-  const result: LoopTickResult = { measured: 0, diagnosed: 0, skipped: [], failed: [] };
+  const result: LoopTickResult = { setUp: 0, measured: 0, diagnosed: 0, skipped: [], failed: [] };
+
+  // --- 0. Unfinished setups ---------------------------------------------------
+  // A product's crawl runs in a request of its own (claimProductSetup). One
+  // registered and left before that request was made, or whose request died
+  // mid-crawl, stays pending until something claims it — this does, once
+  // any lease has run out, inside the owner's scope so a model call is theirs.
+  const pending = await conn.products.find({ where: [["setupStatus", "==", "pending"]] });
+  for (const product of pending) {
+    const claim = await claimProductSetup(product.id, conn, now);
+    if (!claim) continue;
+    const scope = { requestId: `loop-${crypto.randomUUID()}`, userId: product.userId };
+    try {
+      await runInRequestScope(scope, () => setUp(claim));
+      result.setUp += 1;
+    } catch (error) {
+      result.failed.push({ productId: product.id, error: String(describeError(error).error) });
+    }
+  }
 
   // --- 1. Measure -----------------------------------------------------------
   // Done tasks, with the seven-day line applied in code: a range on

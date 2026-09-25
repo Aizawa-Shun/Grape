@@ -164,3 +164,50 @@ describe("runLoopTick — re-diagnosing", () => {
     expect(result.diagnosed).toBe(0);
   });
 });
+
+describe("runLoopTick — unfinished setups", () => {
+  it("finishes a pending setup nobody is running, as its owner", async () => {
+    const db = await testDb();
+    const product = await db.products.insert({
+      userId: "alice",
+      url: "https://pending.example/",
+      name: "p",
+      setupStatus: "pending",
+    });
+
+    const runs: { productId: string; asUser: string | undefined }[] = [];
+    const result = await runLoopTick({
+      now: NOW,
+      database: db,
+      measure: async () => undefined,
+      rediagnose: async () => undefined,
+      setUp: async (claim) => void runs.push({ productId: claim.productId, asUser: currentUserId() }),
+    });
+
+    expect(runs).toEqual([{ productId: product.id, asUser: "alice" }]);
+    expect(result.setUp).toBe(1);
+  });
+
+  /** A browser that is still watching is already running it; the loop must not start a second crawl. */
+  it("leaves a setup alone while another request's lease on it is fresh", async () => {
+    const db = await testDb();
+    await db.products.insert({
+      userId: "alice",
+      url: "https://pending.example/",
+      name: "p",
+      setupStatus: "pending",
+      setupClaimedAt: new Date(NOW.getTime() - 60_000),
+    });
+
+    let ran = false;
+    await runLoopTick({
+      now: NOW,
+      database: db,
+      measure: async () => undefined,
+      rediagnose: async () => undefined,
+      setUp: async () => void (ran = true),
+    });
+
+    expect(ran).toBe(false);
+  });
+});

@@ -13,19 +13,39 @@ const SLOW_AFTER_SEC = 30;
 /**
  * What the product page shows while the site is still being read.
  *
- * The work runs server-side and outlives the request that started it (see
- * api/products/route.ts), so this is a view of someone else's progress rather
- * than a spinner attached to a request this component is holding. That is what
- * makes it survive a reload, a tab close, or a walk to another page and back:
- * there is nothing here to interrupt.
+ * The work runs server-side and is recorded on the row, so this is a view of
+ * progress rather than a spinner attached to one request. That is what makes
+ * it survive a reload, a tab close, or a walk to another page and back.
  *
  * Refreshing the route rather than polling an endpoint of its own — the page
  * already reads `setupStatus` off the row it renders, so a refresh is both the
  * check and the update, with no second code path to keep in agreement.
+ *
+ * It is also what starts the crawl: see the first effect below.
  */
-export function SetupProgress({ url, compact = false }: { url: string; compact?: boolean }) {
+export function SetupProgress({
+  productId,
+  url,
+  compact = false,
+}: {
+  productId: string;
+  url: string;
+  compact?: boolean;
+}) {
   const router = useRouter();
   const [seconds, setSeconds] = useState(0);
+
+  // The crawl runs inside this request (see api/products/[id]/setup). Asked
+  // once per mount; a second watcher, or a reload mid-crawl, gets "already
+  // running" and simply keeps polling below until the row changes.
+  //
+  // Deliberately never aborted on unmount: leaving the page must not cancel a
+  // crawl someone asked for. The request finishes on the server either way.
+  useEffect(() => {
+    void fetch(`/api/products/${productId}/setup`, { method: "POST" })
+      .then(() => router.refresh())
+      .catch(() => undefined);
+  }, [productId, router]);
 
   useEffect(() => {
     const tick = setInterval(() => setSeconds((value) => value + 1), 1_000);

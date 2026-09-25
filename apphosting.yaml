@@ -1,0 +1,58 @@
+# Firebase App Hosting — https://firebase.google.com/docs/app-hosting/configure
+#
+# Grape runs as one App Hosting backend: the Next.js server (pages, API
+# routes, the ingest endpoint the tracking snippet posts to). Its data is
+# Firestore and its sign-in is Firebase Authentication, both in the same
+# project, reached with the backend's own service account — so there is no
+# database URL, token or service-account key to configure here at all.
+
+runConfig:
+  # A crawl can launch Chromium (see src/core/context/render.ts), which
+  # needs the memory; the rest of Grape is light.
+  cpu: 1
+  memoryMiB: 1024
+  # 0 lets an idle Grape cost nothing. The first request after idling waits
+  # for a cold start — the scheduled loop included, which is fine.
+  minInstances: 0
+  maxInstances: 2
+  # Nothing runs after a response has gone out: Cloud Run only promises CPU
+  # to requests in flight, so a crawl runs inside a request of its own
+  # (api/products/[id]/setup) and the weekly loop inside the scheduler's.
+  concurrency: 20
+
+env:
+  # Encrypts each account's AI API keys in Firestore. Required. Create it once
+  # with `firebase apphosting:secrets:set GRAPE_ENCRYPTION_KEY` (any long
+  # random value); changing it later makes every stored API key unreadable.
+  - variable: GRAPE_ENCRYPTION_KEY
+    secret: GRAPE_ENCRYPTION_KEY
+
+  # The bearer token the weekly loop's scheduled function presents to
+  # POST /api/cron/tick (functions/index.js). Same secret, granted to both.
+  - variable: GRAPE_CRON_SECRET
+    secret: GRAPE_CRON_SECRET
+
+  # Which AI service to use; each account then adds its own key from
+  # /account. Leave as "" to start with AI off.
+  - variable: LLM_PROVIDER
+    value: "anthropic"
+    availability:
+      - RUNTIME
+
+  # Anything but the exact string "false" keeps practice mode on: approving
+  # an X post records it without sending. Can also be switched from /settings.
+  - variable: GRAPE_ACTION_DRY_RUN
+    value: "true"
+    availability:
+      - RUNTIME
+
+  # Posting to X for real needs your own X app's credentials, as secrets.
+  # Uncomment after `firebase apphosting:secrets:set X_CONSUMER_KEY` etc.
+  # - variable: X_CONSUMER_KEY
+  #   secret: X_CONSUMER_KEY
+  # - variable: X_CONSUMER_SECRET
+  #   secret: X_CONSUMER_SECRET
+  # - variable: X_ACCESS_TOKEN
+  #   secret: X_ACCESS_TOKEN
+  # - variable: X_ACCESS_TOKEN_SECRET
+  #   secret: X_ACCESS_TOKEN_SECRET

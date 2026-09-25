@@ -11,6 +11,7 @@ import { db } from "@/db/client";
 import { by } from "@/db/sort";
 import { env } from "@/env";
 import { requireUser } from "@/server/auth/current-user";
+import { publicIngestOrigin } from "@/server/public-origin";
 
 import { KeyEventForm } from "../products/[id]/key-event-form";
 import { TrackingSnippet } from "../products/[id]/tracking-snippet";
@@ -52,7 +53,8 @@ export default async function SettingsPage({
   // LLM_MONTHLY_BUDGET_USD is checked against — see core/llm/budget.ts.
   const spentThisMonth = await monthSpendUsd(undefined, undefined, user.id);
 
-  const ingestReachable = !/localhost|127\.0\.0\.1/.test(settings.INGEST_BASE_URL);
+  const ingestOrigin = await publicIngestOrigin();
+  const ingestReachable = !/localhost|127\.0\.0\.1/.test(ingestOrigin);
   // Anthropic/OpenAI-compat API keys used to be here too, back when one
   // instance-wide credential served every account. They are per-account now
   // (see /account) and never come from .env, so this list is down to the
@@ -80,7 +82,7 @@ export default async function SettingsPage({
 
           <div className="flex flex-col gap-3">
             <h3 className="text-sm font-medium text-text-muted">計測用のコード</h3>
-            <TrackingSnippet productId={product.id} ingestBaseUrl={settings.INGEST_BASE_URL} />
+            <TrackingSnippet productId={product.id} ingestBaseUrl={ingestOrigin} />
           </div>
         </Section>
       ) : (

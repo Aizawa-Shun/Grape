@@ -108,6 +108,12 @@ export interface Product {
   /** How far the crawl-and-read pass has got; see core/product/register.ts. */
   setupStatus: ProductSetupStatus;
   setupError: string | null;
+  /**
+   * When a request last took on the crawl for this product — a lease, so two
+   * browsers watching the same pending product do not both crawl it, and a
+   * crawl whose request died is picked up again once the lease runs out.
+   */
+  setupClaimedAt: Date | null;
   createdAt: Date;
 }
 

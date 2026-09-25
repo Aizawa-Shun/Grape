@@ -12,9 +12,8 @@ export const dynamic = "force-dynamic";
 /**
  * Runs one turn of the weekly loop (core/loop/tick.ts) for every account.
  *
- * Meant for a scheduler — the GitHub Actions workflow in
- * .github/workflows/loop.yml, a Render cron job, or anything else that can
- * send a POST once a day. It has no session to present, so the proxy lets it
+ * Meant for a scheduler — the Cloud Functions trigger in functions/index.js,
+ * or anything else that can send a POST once a day. It has no session to present, so the proxy lets it
  * through (src/proxy.ts) and this checks `Authorization: Bearer
  * $GRAPE_CRON_SECRET` instead.
  *

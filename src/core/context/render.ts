@@ -12,6 +12,13 @@
  * Playwright is imported lazily and every failure is soft. A checkout that
  * never ran `npx playwright install chromium` still crawls static sites
  * normally; it just cannot rescue client-rendered ones.
+ *
+ * Two places to find a browser, tried in order (see launchChromium):
+ * Playwright's own download, which is what a developer machine has after
+ * `npx playwright install chromium`, and @sparticuz/chromium, a
+ * self-contained Chromium built to run in serverless containers — which is
+ * what App Hosting is (Cloud Run), with no browser in its base image and no
+ * way to run `playwright install` at deploy time.
  */
 
 import { log } from "@/server/log";
@@ -72,6 +79,48 @@ const MIN_RENDERED_TEXT_CHARS = 50;
 
 let launchWarningLogged = false;
 
+type Chromium = typeof import("playwright").chromium;
+type Browser = Awaited<ReturnType<Chromium["launch"]>>;
+
+/**
+ * On a serverless container (Cloud Run sets K_SERVICE) the bundled Chromium
+ * is tried first, since Playwright's download is never there; anywhere else
+ * Playwright's own browser comes first and the bundled one is the fallback.
+ */
+async function launchChromium(chromium: Chromium): Promise<Browser | null> {
+  const serverless = Boolean(process.env.K_SERVICE);
+  const attempts = serverless ? [bundled, playwrights] : [playwrights, bundled];
+  const failures: string[] = [];
+
+  for (const attempt of attempts) {
+    try {
+      return await attempt(chromium);
+    } catch (error) {
+      failures.push(describe(error));
+    }
+  }
+
+  // The package can be present while no browser binary is, which is the
+  // normal state after `pnpm install` without `npx playwright install`.
+  warnOnce(
+    `could not launch Chromium (${failures.join("; ")}) — run \`npx playwright install chromium\` to read client-rendered pages.`,
+  );
+  return null;
+}
+
+function playwrights(chromium: Chromium): Promise<Browser> {
+  return chromium.launch({ headless: true });
+}
+
+async function bundled(chromium: Chromium): Promise<Browser> {
+  const { default: sparticuz } = await import("@sparticuz/chromium");
+  return chromium.launch({
+    headless: true,
+    executablePath: await sparticuz.executablePath(),
+    args: sparticuz.args,
+  });
+}
+
 export async function createPageRenderer(): Promise<PageRenderer> {
   let chromium;
   try {
@@ -81,17 +130,8 @@ export async function createPageRenderer(): Promise<PageRenderer> {
     return NOOP_RENDERER;
   }
 
-  let browser;
-  try {
-    browser = await chromium.launch({ headless: true });
-  } catch (error) {
-    // The package can be present while the browser binary is not, which is the
-    // normal state after `pnpm install` without `npx playwright install`.
-    warnOnce(
-      `could not launch Chromium (${describe(error)}) — run \`npx playwright install chromium\` to read client-rendered pages.`,
-    );
-    return NOOP_RENDERER;
-  }
+  const browser = await launchChromium(chromium);
+  if (!browser) return NOOP_RENDERER;
 
   return {
     async render(url: string, options: RenderOptions = {}): Promise<RenderedPage | null> {

@@ -83,11 +83,11 @@ const EnvSchema = z.object({
 
   // --- Data layer ---------------------------------------------------------
   /**
-   * Public origin the tracking snippet posts to. Grape runs on localhost, but
-   * the snippet is loaded by a browser on the open internet, so this has to be
-   * a publicly reachable origin — during development, a cloudflared quick
-   * tunnel. It changes every time the tunnel restarts, which is why the
-   * snippet is generated on demand rather than written down once.
+   * Public origin the tracking snippet posts to. Optional on App Hosting: left
+   * unset, the snippet uses the origin its page was served from (see
+   * server/public-origin.ts). Set it for a custom domain, or locally to a
+   * cloudflared quick tunnel — the snippet runs in a browser on the open
+   * internet, which cannot reach localhost.
    */
   INGEST_BASE_URL: httpUrl("http://localhost:3000"),
 
@@ -199,27 +199,9 @@ function definedEntries(source: Record<string, string | undefined>): Record<stri
   return out;
 }
 
-/**
- * A host that already knows its own public address tells us, so the tracking
- * snippet is correct the moment the service first boots.
- *
- * This matters more than it looks. INGEST_BASE_URL falls back to localhost,
- * which is right on a developer's machine and silently wrong on a deployment:
- * the snippet is copied onto a real site, posts to http://localhost:3000 from
- * a stranger's browser, and no event ever arrives — with nothing anywhere
- * saying why. Render publishes RENDER_EXTERNAL_URL for exactly this.
- *
- * An explicit INGEST_BASE_URL still wins, as does the /settings override
- * stored in SQLite, so a custom domain is one field and no redeploy.
- */
-function withHostProvidedOrigin(source: Record<string, string>): Record<string, string> {
-  if (source.INGEST_BASE_URL || !source.RENDER_EXTERNAL_URL) return source;
-  return { ...source, INGEST_BASE_URL: source.RENDER_EXTERNAL_URL };
-}
-
 /** Takes its source as an argument so the rules above are testable without mutating process.env. */
 export function parseEnv(source: Record<string, string | undefined>): Env {
-  const parsed = CheckedEnvSchema.safeParse(withHostProvidedOrigin(definedEntries(source)));
+  const parsed = CheckedEnvSchema.safeParse(definedEntries(source));
   if (!parsed.success) {
     const detail = parsed.error.issues
       .map((issue) => `  ${issue.path.join(".") || "(root)"}: ${issue.message}`)

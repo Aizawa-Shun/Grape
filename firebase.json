@@ -7,13 +7,44 @@
     {
       "source": "functions",
       "codebase": "loop",
-      "runtime": "nodejs22"
+      "runtime": "nodejs22",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "*.log"
+      ]
     }
   ],
   "emulators": {
-    "auth": { "port": 9099 },
-    "firestore": { "port": 8080 },
-    "ui": { "enabled": true, "port": 4000 },
+    "auth": {
+      "port": 9099
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "ui": {
+      "enabled": true,
+      "port": 4000
+    },
     "singleProjectMode": true
-  }
+  },
+  "apphosting": [
+    {
+      "backendId": "grape",
+      "rootDir": "/",
+      "ignore": [
+        "node_modules",
+        ".git",
+        ".next",
+        "functions",
+        "firebase-debug.log",
+        "firestore-debug.log",
+        "ui-debug.log",
+        "*.db",
+        "*.db-*",
+        "dist",
+        "backups"
+      ]
+    }
+  ]
 }

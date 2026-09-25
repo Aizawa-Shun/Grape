@@ -9,7 +9,7 @@ import {
   type ProductContextExtraction,
 } from "@/core/context/extract";
 import { getProvider, llmAvailable } from "@/core/llm";
-import { db } from "@/db/client";
+import { db, type Database } from "@/db/client";
 import { normalizeUrl } from "@/core/context/crawl";
 import { describeError, log } from "@/server/log";
 import { describeForUser } from "@/server/http/errors";
@@ -91,7 +91,11 @@ export async function startProductSetup(input: {
       // pending and drops whatever the previous attempt had to say about
       // itself. The name is kept: it may be one someone chose on the review
       // screen.
-      await tx.products.update(existing.id, { setupStatus: "pending", setupError: null });
+      await tx.products.update(existing.id, {
+        setupStatus: "pending",
+        setupError: null,
+        setupClaimedAt: null,
+      });
       return existing.id;
     }
     const created = await tx.products.insert({
@@ -105,6 +109,41 @@ export async function startProductSetup(input: {
   });
 
   return { productId, url };
+}
+
+/**
+ * How long a claim on a pending setup holds. Longer than any real crawl-and-
+ * read takes (a slow site with the browser fallback and a model call is a
+ * minute or two), short enough that a request that died mid-crawl — a
+ * deploy, a crashed instance — is retried within minutes, by whichever
+ * browser is still watching or by the scheduled loop.
+ */
+export const SETUP_LEASE_MS = 5 * 60 * 1000;
+
+/**
+ * Takes the crawl for a pending product, or reports that someone already has.
+ *
+ * The crawl runs inside a request, never after one: App Hosting is Cloud Run,
+ * which only promises CPU while a request is in flight, so work left running
+ * after a response has gone out can stall or be dropped. Whichever request
+ * wins this claim — the progress screen asking (api/products/[id]/setup), or
+ * the scheduled loop finding a lease that ran out — does the whole job before
+ * it answers. The claim is a transaction so two watchers cannot both win.
+ */
+export async function claimProductSetup(
+  productId: string,
+  database: Database = db,
+  now: Date = new Date(),
+): Promise<StartedProduct | null> {
+  return database.runTransaction(async (tx) => {
+    const product = await tx.products.get(productId);
+    if (!product || product.setupStatus !== "pending") return null;
+    const claimed = product.setupClaimedAt;
+    if (claimed && now.getTime() - claimed.getTime() < SETUP_LEASE_MS) return null;
+
+    await tx.products.update(productId, { setupClaimedAt: now });
+    return { productId, url: product.url };
+  });
 }
 
 /**
@@ -163,7 +202,12 @@ export async function runProductSetup({ productId, url }: StartedProduct): Promi
     const siteName = siteNameFrom(pages);
     const rename = siteName && product?.name === new URL(url).hostname ? { name: siteName } : {};
 
-    await db.products.update(productId, { setupStatus: "ready", setupError: null, ...rename });
+    await db.products.update(productId, {
+      setupStatus: "ready",
+      setupError: null,
+      setupClaimedAt: null,
+      ...rename,
+    });
   } catch (error) {
     const shown = toAppError(error);
     const message = shown.hint ?? describeForUser(shown);
@@ -179,7 +223,7 @@ export async function runProductSetup({ productId, url }: StartedProduct): Promi
     // from an earlier run, and one failed re-crawl must not discard it — so
     // the error is recorded alongside the old context rather than in place of
     // it, and the page shows both.
-    await db.products.update(productId, { setupStatus: "failed", setupError: message });
+    await db.products.update(productId, { setupStatus: "failed", setupError: message, setupClaimedAt: null });
   }
 }
 
