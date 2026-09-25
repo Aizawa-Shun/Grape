@@ -30,7 +30,7 @@
   },
   "apphosting": [
     {
-      "backendId": "grape",
+      "backendId": "grape-backend",
       "rootDir": "/",
       "ignore": [
         "node_modules",

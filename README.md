@@ -106,7 +106,7 @@ App Hosting と Cloud Functions を使うので、プロジェクトは **Blaze�
 2. **Firestore Database** を作る（ネイティブモード、ロケーションは例えば `asia-northeast1`）
 3. **Authentication** を開始し、ログイン方法で **メール / パスワード** と **Google** を
    有効にする
-4. **App Hosting** でバックエンドを作る。バックエンドIDは `grape`、リージョンは
+4. **App Hosting** でバックエンドを作る。バックエンドIDは `grape-backend`（`firebase.json` の `backendId` と同じにします）、リージョンは
    お好みで。GitHub リポジトリをつなぐと、push のたびに自動でデプロイされます
    （つながずに、手元から下記の `firebase deploy` で上げることもできます）。
    ウェブアプリも一緒に作られ、その設定（`FIREBASE_WEBAPP_CONFIG`）は
@@ -129,7 +129,7 @@ firebase apphosting:secrets:set GRAPE_CRON_SECRET
 
 それぞれ値を訊かれるので、長いランダムな値を入れてください
 （`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`）。
-「バックエンドにアクセスを許可するか」と訊かれたら `grape` を許可します。
+「バックエンドにアクセスを許可するか」と訊かれたら `grape-backend` を許可します。
 
 - `GRAPE_ENCRYPTION_KEY` — 各自のAI APIキーを Firestore に暗号化して保存する鍵。
   **後から変えると、保存済みのAPIキーはすべて読めなくなります**（各自が入れ直せば直ります）
