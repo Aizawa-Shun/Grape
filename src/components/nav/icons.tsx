@@ -29,6 +29,36 @@ function Glyph({ children, ...props }: SVGProps<SVGSVGElement>) {
 export type IconName = keyof typeof ICONS;
 
 export const ICONS = {
+  growth: (
+    <Glyph>
+      <path d="M2 12.5 6 8.5l2.5 2.5L14 5.5" />
+      <path d="M10.5 5.5H14V9" />
+    </Glyph>
+  ),
+  research: (
+    <Glyph>
+      <circle cx="7" cy="7" r="4.25" />
+      <path d="m10.25 10.25 3.25 3.25" />
+    </Glyph>
+  ),
+  strategy: (
+    <Glyph>
+      <circle cx="8" cy="8" r="5.5" />
+      <circle cx="8" cy="8" r="2.5" />
+      <circle cx="8" cy="8" r="0.5" />
+    </Glyph>
+  ),
+  posts: (
+    <Glyph>
+      <path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2v-7Z" />
+    </Glyph>
+  ),
+  shield: (
+    <Glyph>
+      <path d="M8 2 13 4v4c0 3-2.2 5.2-5 6-2.8-.8-5-3-5-6V4l5-2Z" />
+      <path d="m5.75 8 1.5 1.5 3-3" />
+    </Glyph>
+  ),
   home: (
     <Glyph>
       <path d="M2.5 7 8 2.5 13.5 7v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1V7Z" />

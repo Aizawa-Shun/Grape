@@ -28,9 +28,10 @@ function copyForStep(step: NextStep): StepCopy {
     case "register":
       return {
         eyebrow: "はじめに",
-        headline: "調べたいサービスを1つ登録してください",
-        detail: "URLを入れると、サイトを読んで、何のサービスかを整理します。",
-        action: "下のフォームから追加",
+        headline: "作ったSaaSのURLを入れてください。ユーザー探しはAIがやります。",
+        detail:
+          "サイトを読んで何のサービスかを理解し、市場・競合・見込み客を調べて、最初のグロース計画と投稿案を作ります。あなたは確認して承認するだけです。",
+        action: "下のフォームから始める",
         href: "#register",
       };
     case "review_task":

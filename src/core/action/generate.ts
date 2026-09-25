@@ -8,6 +8,7 @@ import { db, type Database } from "@/db/client";
 import type { Artifact, ArtifactKind, Channel, Task } from "@/db/schema";
 
 import { X_POST_MAX_CHARS } from "./channels/x";
+import { fitToX } from "./channels/x-text";
 import { CHANNEL_ARTIFACT_KINDS } from "./kinds";
 
 export { CHANNEL_ARTIFACT_KINDS } from "./kinds";
@@ -68,7 +69,7 @@ function generateSystemSuffix(kind: ArtifactKind, primaryLanguage: string): stri
 あなたは上記プロダクトの成長担当です。以下のタスクを踏まえて、X（旧Twitter）に投稿する文章を1件作成してください。
 
 厳守すること:
-1. ${X_POST_MAX_CHARS}文字より十分短く、240文字程度を目安にする。
+1. Xの文字数上限（${X_POST_MAX_CHARS}。日本語などの全角文字は1字を2と数えるので、日本語なら120字程度）に十分収める。
 2. Product Contextに書かれていない機能・実績・数字を主張しない。
 3. 「必ず」「絶対に」のような誇張表現を避ける。
 4. ハッシュタグは0〜2個まで。
@@ -188,9 +189,9 @@ async function writeContent(
     schemaName: "artifact_content",
     schema: ArtifactContentSchema,
   });
-  return kind === "x_post"
-    ? truncateToLimit(value.content.trim(), X_POST_MAX_CHARS)
-    : value.content.trim();
+  // Measured the way X measures, not with `.length`: a Japanese post runs
+  // out at 140 characters (see channels/x-text.ts).
+  return kind === "x_post" ? fitToX(value.content.trim()) : value.content.trim();
 }
 
 export interface GenerateOptions {

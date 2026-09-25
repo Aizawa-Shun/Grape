@@ -151,6 +151,16 @@ const EnvSchema = z.object({
   X_CONSUMER_SECRET: z.string().optional(),
   X_ACCESS_TOKEN: z.string().optional(),
   X_ACCESS_TOKEN_SECRET: z.string().optional(),
+  /**
+   * App-only token for reading X — searching recent posts for people who may
+   * need the product (core/growth/sources/x.ts). Optional: without it the
+   * four posting credentials above are used for reads too, and with neither
+   * the growth loop looks for conversations on Hacker News and the open web
+   * instead. Reads are metered on X's pay-per-use tier, so the search is
+   * capped per run (X_SEARCH_MAX_RESULTS).
+   */
+  X_BEARER_TOKEN: z.string().optional(),
+  X_SEARCH_MAX_RESULTS: z.coerce.number().int().min(10).max(100).default(20),
 });
 
 /**

@@ -1,4 +1,5 @@
 import { toAppError } from "@/core/errors";
+import { runGrowthTick, type GrowthTickResult } from "@/core/growth/agent";
 import { diagnoseProduct } from "@/core/intelligence/diagnose";
 import { DEFAULT_WINDOW_DAYS, evaluateOutcome } from "@/core/intelligence/outcomes";
 import { recommendTasks } from "@/core/intelligence/recommend";
@@ -49,6 +50,8 @@ export interface LoopTickResult {
   skipped: { productId: string; reason: string }[];
   /** Attempted and failed. The rest of the run carried on regardless. */
   failed: { productId?: string; taskId?: string; error: string }[];
+  /** The growth loop's daily runs (core/growth/agent.ts). */
+  growth: GrowthTickResult | null;
 }
 
 export interface LoopTickOptions {
@@ -60,7 +63,16 @@ export interface LoopTickOptions {
   rediagnose?: (productId: string) => Promise<unknown>;
   /** Injectable for the same reason; runs inside the owner's request scope. */
   setUp?: (claim: StartedProduct) => Promise<unknown>;
+  /** Injectable for the same reason: the growth loop's daily pass, given a time budget. */
+  growth?: (budgetMs: number) => Promise<GrowthTickResult>;
 }
+
+/**
+ * How long the growth pass may take. The scheduler waits ~530s for the whole
+ * tick; this leaves the steps above their share and ends early enough that a
+ * half-finished growth run is simply carried on by the next caller.
+ */
+const GROWTH_BUDGET_MS = 300_000;
 
 async function defaultRediagnose(productId: string): Promise<void> {
   const diagnosis = await diagnoseProduct(productId);
@@ -84,6 +96,7 @@ export async function runLoopTick(options: LoopTickOptions = {}): Promise<LoopTi
       diagnosed: 0,
       skipped: [{ productId: "*", reason: "already running" }],
       failed: [],
+      growth: null,
     };
   }
   running = true;
@@ -93,6 +106,7 @@ export async function runLoopTick(options: LoopTickOptions = {}): Promise<LoopTi
       setUp: result.setUp,
       measured: result.measured,
       diagnosed: result.diagnosed,
+      growthStarted: result.growth?.started ?? 0,
       skipped: result.skipped.length,
       failed: result.failed.length,
     });
@@ -110,7 +124,7 @@ async function tick(options: LoopTickOptions): Promise<LoopTickResult> {
   const rediagnose = options.rediagnose ?? defaultRediagnose;
   const setUp = options.setUp ?? runProductSetup;
 
-  const result: LoopTickResult = { setUp: 0, measured: 0, diagnosed: 0, skipped: [], failed: [] };
+  const result: LoopTickResult = { setUp: 0, measured: 0, diagnosed: 0, skipped: [], failed: [], growth: null };
 
   // --- 0. Unfinished setups ---------------------------------------------------
   // A product's crawl runs in a request of its own (claimProductSetup). One
@@ -186,6 +200,16 @@ async function tick(options: LoopTickOptions): Promise<LoopTickResult> {
         result.failed.push({ productId: product.id, error: String(describeError(error).error) });
       }
     }
+  }
+
+  // --- 3. Grow ---------------------------------------------------------------
+  // Daily growth runs for products whose owner has started the growth loop.
+  // Its own failures are its own: counted in `growth`, never failing the tick.
+  const growth = options.growth ?? ((budgetMs: number) => runGrowthTick(budgetMs, conn, now));
+  try {
+    result.growth = await growth(GROWTH_BUDGET_MS);
+  } catch (error) {
+    result.failed.push({ error: `growth: ${String(describeError(error).error)}` });
   }
 
   return result;

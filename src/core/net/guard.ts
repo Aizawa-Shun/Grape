@@ -33,6 +33,14 @@ export function policyForEntry(entryUrl: string, lookup: Lookup = realLookup): T
   return { entryHost: new URL(entryUrl).hostname.toLowerCase(), lookup };
 }
 
+/**
+ * A policy that trusts no host at all — for URLs nobody typed: a competitor's
+ * homepage a web search turned up, say. Every target has to resolve public.
+ */
+export function publicOnlyPolicy(lookup: Lookup = realLookup): TargetPolicy {
+  return { entryHost: "", lookup };
+}
+
 export function isPrivateAddress(address: string): boolean {
   const ip = address.toLowerCase();
 

@@ -10,7 +10,12 @@ import type { ZodType } from "zod";
  * this interface on purpose.
  */
 
-export const TASK_KINDS = ["extract", "diagnose", "generate"] as const;
+/**
+ * `research` is the growth loop's reading of the market — web searches, the
+ * competitor pages, the conversations found — kept apart from `extract` so
+ * /usage shows what that loop costs on its own.
+ */
+export const TASK_KINDS = ["extract", "diagnose", "generate", "research"] as const;
 export type TaskKind = (typeof TASK_KINDS)[number];
 
 export type Effort = "low" | "medium" | "high";
@@ -24,6 +29,7 @@ export const EFFORT_BY_KIND: Record<TaskKind, Effort> = {
   extract: "medium",
   diagnose: "high",
   generate: "medium",
+  research: "medium",
 };
 
 export interface Usage {

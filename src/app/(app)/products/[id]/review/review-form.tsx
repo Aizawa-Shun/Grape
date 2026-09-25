@@ -55,6 +55,12 @@ interface Props {
   /** Already passed through editableValue — no sentinel reaches an input. */
   initialFields: DraftFields;
   notes: DraftNotes;
+  /**
+   * Where saving leads. On first registration that is the growth loop's start
+   * ("100人を目指しますか？"), so understanding flows straight into a goal;
+   * a later correction goes back to the product page it came from.
+   */
+  nextHref: string;
 }
 
 /**
@@ -70,7 +76,7 @@ interface Props {
  * to a site it was never about. Instead the address is saved and the new site
  * is read, and this screen comes back with a fresh draft for it.
  */
-export function ReviewForm({ productId, initialName, initialUrl, initialFields, notes }: Props) {
+export function ReviewForm({ productId, initialName, initialUrl, initialFields, notes, nextHref }: Props) {
   const router = useRouter();
   const [name, setName] = useState(initialName);
   const [url, setUrl] = useState(initialUrl);
@@ -122,7 +128,7 @@ export function ReviewForm({ productId, initialName, initialUrl, initialFields, 
       };
       if (!(await send(`/api/products/${productId}/context`, "PUT", trimmed))) return;
 
-      router.push(`/products/${productId}`);
+      router.push(nextHref);
       router.refresh();
     });
   }

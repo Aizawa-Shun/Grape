@@ -205,10 +205,12 @@ export interface RecordCallInput {
   productId?: string;
   /** Overrides the ambient session, for callers that already know the owner. */
   userId?: string;
+  /** Spend that is not tokens — web searches, billed per search on top of the call. */
+  extraCostUsd?: number;
 }
 
 export async function recordCall(input: RecordCallInput, database: Database = db): Promise<void> {
-  const costUsd = estimateCostUsd(input.provider, input.model, input.usage);
+  const costUsd = estimateCostUsd(input.provider, input.model, input.usage) + (input.extraCostUsd ?? 0);
   await database.llmCalls.insert({
     productId: input.productId ?? null,
     // Read here, per call, rather than captured when the provider was wrapped:

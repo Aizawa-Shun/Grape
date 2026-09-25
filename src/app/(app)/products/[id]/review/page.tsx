@@ -5,6 +5,7 @@ import { Page, PageHeader } from "@/components/ui/page";
 import { contextVersions } from "@/core/context/edit";
 import { draftNotesFor, editableValue } from "@/core/context/review";
 import { findOwnedProduct } from "@/core/product/ownership";
+import { db } from "@/db/client";
 import { requireUser } from "@/server/auth/current-user";
 
 import { BackLink } from "../../../back-link";
@@ -69,6 +70,7 @@ export default async function ReviewProductPage({ params }: { params: Promise<{ 
     );
   }
 
+  const growthStarted = Boolean(await db.productKnowledge.get(id));
   const fields = { what: latest.what, who: latest.who, why: latest.why, how: latest.how };
   const notes = draftNotesFor(fields, latest.analysis ?? null, latest.editedByHuman);
 
@@ -96,6 +98,7 @@ export default async function ReviewProductPage({ params }: { params: Promise<{ 
           how: editableValue(fields.how),
         }}
         notes={notes}
+        nextHref={growthStarted ? `/products/${id}` : `/products/${id}/growth`}
       />
     </Page>
   );

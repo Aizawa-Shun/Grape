@@ -29,6 +29,7 @@ const TASK_LABELS: Record<string, string> = {
   extract: "サイトの読み取り",
   diagnose: "診断",
   generate: "文面の作成",
+  research: "市場調査・見込み客探し",
 };
 
 function usd(value: number): string {

@@ -46,6 +46,8 @@ export const ERROR_CODES = [
 
   "CHANNEL_AUTH",
   "CHANNEL_FAILED",
+  /** The growth loop's safety settings (core/growth/policy.ts) stopped a send. */
+  "POLICY_BLOCKED",
 
   "DB_ERROR",
   "INTERNAL",

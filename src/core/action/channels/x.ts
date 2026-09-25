@@ -1,6 +1,7 @@
 import { createHmac, randomBytes } from "node:crypto";
 
 import type { ActionChannel } from "../channel";
+import { xWeightedLength } from "./x-text";
 import { ChannelError } from "../channel";
 
 /**
@@ -109,45 +110,78 @@ interface TweetResponse {
   title?: string;
 }
 
+/**
+ * Sends one post, optionally as a reply. Shared by the task channel below and
+ * the growth loop's posts and replies (core/growth/publish.ts), so the length
+ * check, the auth header and the error mapping exist once.
+ */
+export async function sendTweet(
+  credentials: XCredentials,
+  content: string,
+  replyToId: string | null = null,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ id: string; externalUrl: string; response: unknown }> {
+  const length = xWeightedLength(content);
+  if (length > X_POST_MAX_CHARS) {
+    throw new ChannelError(
+      `Post weighs ${length}, over X's ${X_POST_MAX_CHARS} limit`,
+      "x",
+      "rejected",
+    );
+  }
+
+  const response = await fetchImpl(API_URL, {
+    method: "POST",
+    headers: {
+      Authorization: buildAuthHeader("POST", API_URL, credentials),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(
+      replyToId ? { text: content, reply: { in_reply_to_tweet_id: replyToId } } : { text: content },
+    ),
+  });
+
+  const body = (await response.json().catch(() => null)) as TweetResponse | null;
+
+  if (!response.ok || !body?.data) {
+    const message =
+      body?.errors?.[0]?.message ?? body?.detail ?? body?.title ?? `HTTP ${response.status}`;
+    // 403 here is usually the trap the .env comments warn about: a token
+    // issued before the app was switched to "Read and Write" stays
+    // read-only, which is a credential problem, not a content one. It is
+    // also what X answers when a reply is not allowed to that conversation.
+    const failure = response.status === 401 || response.status === 403 ? "auth" : "rejected";
+    throw new ChannelError(`X API rejected the post: ${message}`, "x", failure, body);
+  }
+
+  return { id: body.data.id, externalUrl: `https://x.com/i/status/${body.data.id}`, response: body };
+}
+
+/** The four posting credentials from the environment, or null when any is missing. */
+export function xCredentialsFrom(source: {
+  X_CONSUMER_KEY?: string;
+  X_CONSUMER_SECRET?: string;
+  X_ACCESS_TOKEN?: string;
+  X_ACCESS_TOKEN_SECRET?: string;
+}): XCredentials | null {
+  const { X_CONSUMER_KEY, X_CONSUMER_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET } = source;
+  if (!X_CONSUMER_KEY || !X_CONSUMER_SECRET || !X_ACCESS_TOKEN || !X_ACCESS_TOKEN_SECRET) return null;
+  return {
+    consumerKey: X_CONSUMER_KEY,
+    consumerSecret: X_CONSUMER_SECRET,
+    accessToken: X_ACCESS_TOKEN,
+    accessTokenSecret: X_ACCESS_TOKEN_SECRET,
+  };
+}
+
 export function createXChannel(credentials: XCredentials): ActionChannel {
   return {
     name: "x",
     estimateCostUsd: estimateXPostCostUsd,
 
     async execute(content: string) {
-      if (content.length > X_POST_MAX_CHARS) {
-        throw new ChannelError(
-          `Post is ${content.length} characters, over X's ${X_POST_MAX_CHARS} limit`,
-          "x",
-          "rejected",
-        );
-      }
-
-      const response = await fetch(API_URL, {
-        method: "POST",
-        headers: {
-          Authorization: buildAuthHeader("POST", API_URL, credentials),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ text: content }),
-      });
-
-      const body = (await response.json().catch(() => null)) as TweetResponse | null;
-
-      if (!response.ok || !body?.data) {
-        const message =
-          body?.errors?.[0]?.message ?? body?.detail ?? body?.title ?? `HTTP ${response.status}`;
-        // 403 here is usually the trap the .env comments warn about: a token
-        // issued before the app was switched to "Read and Write" stays
-        // read-only, which is a credential problem, not a content one.
-        const failure = response.status === 401 || response.status === 403 ? "auth" : "rejected";
-        throw new ChannelError(`X API rejected the post: ${message}`, "x", failure, body);
-      }
-
-      return {
-        externalUrl: `https://x.com/i/status/${body.data.id}`,
-        response: body,
-      };
+      const { externalUrl, response } = await sendTweet(credentials, content);
+      return { externalUrl, response };
     },
   };
 }

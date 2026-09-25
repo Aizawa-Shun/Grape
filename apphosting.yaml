@@ -66,3 +66,5 @@ env:
   #   secret: X_ACCESS_TOKEN
   # - variable: X_ACCESS_TOKEN_SECRET
   #   secret: X_ACCESS_TOKEN_SECRET
+  # - variable: X_BEARER_TOKEN
+  #   secret: X_BEARER_TOKEN

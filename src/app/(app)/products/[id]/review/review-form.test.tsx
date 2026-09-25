@@ -29,6 +29,7 @@ function renderForm(overrides: Partial<Parameters<typeof ReviewForm>[0]> = {}) {
       initialUrl="https://cheeeess.com/"
       initialFields={FIELDS}
       notes={{ source: "ai", blank: [], guessed: ["who", "why"] }}
+      nextHref="/products/p1"
       {...overrides}
     />,
   );

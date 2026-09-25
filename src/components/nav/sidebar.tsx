@@ -54,6 +54,23 @@ const LOOP: Item[] = [
   },
 ];
 
+/**
+ * The growth loop: finding the people and talking to them. Its own group
+ * because it runs on its own rhythm — daily, from the agent — beside the
+ * weekly funnel loop above.
+ */
+const growthHref = (suffix: string) => (id: string | null) => (id ? `/products/${id}/growth${suffix}` : null);
+const growthMatch = (suffix: string) => (pathname: string, id: string | null) =>
+  Boolean(id) && pathname === `/products/${id}/growth${suffix}`;
+
+const GROWTH: Item[] = [
+  { label: "グロース", icon: "growth", href: growthHref(""), match: growthMatch(""), hint: "目標・見込み客・次の一手" },
+  { label: "投稿と返信", icon: "posts", href: growthHref("/posts"), match: growthMatch("/posts"), hint: "承認待ちの案と、出したものの結果" },
+  { label: "市場とICP", icon: "research", href: growthHref("/research"), match: growthMatch("/research"), hint: "プロダクトの理解・市場・競合・ICP" },
+  { label: "戦略", icon: "strategy", href: growthHref("/strategy"), match: growthMatch("/strategy"), hint: "ポジショニング・投稿の配分・学んだこと" },
+  { label: "自動化と安全", icon: "shield", href: growthHref("/settings"), match: growthMatch("/settings"), hint: "承認モード・上限・文体" },
+];
+
 const MANAGE: Item[] = [
   {
     label: "サービス",
@@ -98,7 +115,7 @@ export function Sidebar({
     // Switching product keeps you on the same kind of view rather than
     // dumping you back at the top.
     if (pathname.startsWith("/settings")) return `/settings?product=${id}`;
-    const suffix = pathname.match(/^\/products\/[^/]+\/(funnel|tasks)$/)?.[1];
+    const suffix = pathname.match(/^\/products\/[^/]+\/(funnel|tasks|growth(?:\/[a-z]+)?)$/)?.[1];
     return suffix ? `/products/${id}/${suffix}` : `/products/${id}`;
   }
 
@@ -122,6 +139,14 @@ export function Sidebar({
       <nav aria-label="メイン" className="flex flex-1 flex-col gap-6">
         <Group
           items={LOOP}
+          pathname={pathname}
+          productId={productId}
+          products={products}
+          onNavigate={onNavigate}
+        />
+        <div className="border-t border-border" />
+        <Group
+          items={GROWTH}
           pathname={pathname}
           productId={productId}
           products={products}
@@ -155,14 +180,21 @@ function Group({
   products: NavProduct[];
   onNavigate?: () => void;
 }) {
-  const openTasks = products.find((product) => product.id === productId)?.openTasks ?? 0;
+  const current = products.find((product) => product.id === productId);
+  const openTasks = current?.openTasks ?? 0;
+  const pendingApprovals = current?.pendingApprovals ?? 0;
 
   return (
     <ul className="flex flex-col gap-0.5">
       {items.map((item) => {
         const href = item.href(productId);
         const active = item.match(pathname, productId);
-        const badge = item.label === "診断とタスク" && openTasks > 0 ? openTasks : null;
+        const badge =
+          item.label === "診断とタスク" && openTasks > 0
+            ? openTasks
+            : item.label === "投稿と返信" && pendingApprovals > 0
+              ? pendingApprovals
+              : null;
 
         // No product yet means the scoped views have nothing to point at.
         // Shown but inert, so the shape of the app is still legible on day one.

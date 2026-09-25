@@ -83,6 +83,36 @@ export interface Defaults {
   outcomes: "evaluatedAt";
   llmCalls: "productId" | "userId" | "cacheReadInputTokens" | "cacheCreationInputTokens" | "createdAt";
   settings: "updatedAt";
+  growthRuns: "status" | "claimedAt" | "createdAt" | "finishedAt";
+  growthGoals: "status" | "createdAt";
+  productKnowledge: "brandVoice" | "editedByHuman" | "updatedAt";
+  marketInsights: "userPhrases" | "sources" | "grounded" | "createdAt";
+  competitors: "url" | "xHandle" | "sources" | "verified" | "createdAt";
+  icps: "createdAt";
+  strategies: "runId" | "origin" | "createdAt";
+  opportunities: "runId" | "postedAt" | "icpName" | "status" | "createdAt";
+  posts:
+    | "runId"
+    | "pillar"
+    | "opportunityId"
+    | "replyToUrl"
+    | "replyToExternalId"
+    | "trackingUrl"
+    | "plannedFor"
+    | "status"
+    | "dryRun"
+    | "externalId"
+    | "externalUrl"
+    | "costEstimateUsd"
+    | "error"
+    | "decidedAt"
+    | "publishedAt"
+    | "metrics"
+    | "metricsAt"
+    | "createdAt";
+  agentActions: "runId" | "detail" | "createdAt";
+  analyticsReports: "runId" | "createdAt";
+  growthPolicies: "updatedAt";
 }
 
 export type CollectionSet = {
@@ -149,6 +179,49 @@ export function defaultsFor(name: CollectionName, now: Date): Record<string, unk
     case "llmCalls":
       return { productId: null, userId: null, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, createdAt: now };
     case "settings":
+      return { updatedAt: now };
+    case "growthRuns":
+      return { status: "pending", claimedAt: null, createdAt: now, finishedAt: null };
+    case "growthGoals":
+      return { status: "active", createdAt: now };
+    case "productKnowledge":
+      return { brandVoice: null, editedByHuman: false, updatedAt: now };
+    case "marketInsights":
+      return { userPhrases: [], sources: [], grounded: false, createdAt: now };
+    case "competitors":
+      return { url: null, xHandle: null, sources: [], verified: false, createdAt: now };
+    case "icps":
+      return { createdAt: now };
+    case "strategies":
+      return { runId: null, origin: "planner", createdAt: now };
+    case "opportunities":
+      return { runId: null, postedAt: null, icpName: null, status: "new", createdAt: now };
+    case "posts":
+      return {
+        runId: null,
+        pillar: null,
+        opportunityId: null,
+        replyToUrl: null,
+        replyToExternalId: null,
+        trackingUrl: null,
+        plannedFor: null,
+        status: "draft",
+        dryRun: false,
+        externalId: null,
+        externalUrl: null,
+        costEstimateUsd: null,
+        error: null,
+        decidedAt: null,
+        publishedAt: null,
+        metrics: null,
+        metricsAt: null,
+        createdAt: now,
+      };
+    case "agentActions":
+      return { runId: null, detail: null, createdAt: now };
+    case "analyticsReports":
+      return { runId: null, createdAt: now };
+    case "growthPolicies":
       return { updatedAt: now };
   }
 }

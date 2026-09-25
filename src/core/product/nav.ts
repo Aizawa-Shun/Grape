@@ -15,6 +15,8 @@ export interface NavProduct {
   url: string;
   /** Shown as a count beside 診断とタスク — the only "waiting on you" signal in the nav. */
   openTasks: number;
+  /** Growth posts and replies drafted and waiting for a decision — beside 投稿と返信. */
+  pendingApprovals: number;
 }
 
 /**
@@ -46,10 +48,22 @@ export async function loadNavProducts(userId: string, database?: Database): Prom
     byProduct.set(task.productId, (byProduct.get(task.productId) ?? 0) + 1);
   }
 
+  // Drafts only: the one state that is waiting on the person. Same single
+  // `in` query as the tasks above.
+  const drafts = await conn.posts.find({
+    where: [
+      ["productId", "in", products.map((product) => product.id)],
+      ["status", "==", "draft"],
+    ],
+  });
+  const draftsByProduct = new Map<string, number>();
+  for (const post of drafts) draftsByProduct.set(post.productId, (draftsByProduct.get(post.productId) ?? 0) + 1);
+
   return products.map((product) => ({
     id: product.id,
     name: product.name,
     url: product.url,
     openTasks: byProduct.get(product.id) ?? 0,
+    pendingApprovals: draftsByProduct.get(product.id) ?? 0,
   }));
 }
