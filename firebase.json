@@ -1,7 +1,8 @@
 {
   "firestore": {
     "rules": "firestore.rules",
-    "indexes": "firestore.indexes.json"
+    "indexes": "firestore.indexes.json",
+    "database": "(default)"
   },
   "functions": [
     {
@@ -44,7 +45,8 @@
         "*.db-*",
         "dist",
         "backups"
-      ]
+      ],
+      "alwaysDeployFromSource": true
     }
   ]
 }

@@ -32,6 +32,16 @@ env:
   - variable: GRAPE_CRON_SECRET
     secret: GRAPE_CRON_SECRET
 
+  # The Firebase web app's config, which the sign-in forms need in the
+  # browser. App Hosting fills this in itself only for a backend that has a
+  # web app linked to it; setting it here works either way. Not a secret: a
+  # web apiKey names the project, it authorizes nothing (see
+  # server/auth/firebase-web.ts). From `firebase apps:sdkconfig WEB <appId>`.
+  - variable: FIREBASE_WEBAPP_CONFIG
+    value: '{"apiKey":"AIzaSyAQxDD9ybxBzjoEYL83OuSLCFupdGEZSuE","authDomain":"grape-growth-os.firebaseapp.com","projectId":"grape-growth-os","appId":"1:19567237661:web:f2d81c1b0f003214e5c4f4"}'
+    availability:
+      - RUNTIME
+
   # Which AI service to use; each account then adds its own key from
   # /account. Leave as "" to start with AI off.
   - variable: LLM_PROVIDER
