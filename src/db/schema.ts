@@ -593,6 +593,12 @@ export interface Post {
    * shows it to the next drafts.
    */
   draftText: string | null;
+  /**
+   * What the author must prepare before posting — a comparison screenshot, a
+   * demo clip. The agent writes a post that stands without it but never
+   * pretends it already exists.
+   */
+  assetNeeded: string | null;
   rationale: string;
   opportunityId: string | null;
   replyToUrl: string | null;

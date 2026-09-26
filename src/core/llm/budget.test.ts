@@ -61,7 +61,7 @@ describe("monthSpendUsd / recordCall", () => {
     );
 
     const spent = await monthSpendUsd(db, new Date("2026-03-31T23:59:59Z"));
-    expect(spent).toBeCloseTo(15, 5);
+    expect(spent).toBeCloseTo(10, 5);
   });
 
   it("returns zero with no rows at all", async () => {
@@ -82,9 +82,9 @@ describe("monthSpendUsd / recordCall", () => {
       db,
     );
 
-    expect(await monthSpendUsd(db, undefined, "user-a")).toBeCloseTo(15, 5);
-    expect(await monthSpendUsd(db, undefined, "user-b")).toBeCloseTo(30, 5);
-    expect(await monthSpendUsd(db)).toBeCloseTo(45, 5);
+    expect(await monthSpendUsd(db, undefined, "user-a")).toBeCloseTo(5, 5);
+    expect(await monthSpendUsd(db, undefined, "user-b")).toBeCloseTo(10, 5);
+    expect(await monthSpendUsd(db)).toBeCloseTo(15, 5);
   });
 });
 

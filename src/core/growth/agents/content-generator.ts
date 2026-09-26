@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { fitToX, X_WEIGHTED_LIMIT } from "@/core/action/channels/x-text";
+import { fitToX, xWeightedLength, X_WEIGHTED_LIMIT } from "@/core/action/channels/x-text";
 import type { BrandVoice, GrowthPolicy, PlanSlot, PostType } from "@/db/schema";
 
 import { COMMON_RULES, type AgentDeps } from "./shared";
@@ -25,10 +25,39 @@ export const GeneratedPosts = z.object({
       body: z.string().describe("本文。価値（読み手が持ち帰れること）を中心に。改行してよい。"),
       cta: z.string().describe("最後の一言。問いかけ・保存・試す・フォローなど。宣伝色は強さの指定に合わせる。無くてもよい（空文字）。"),
       includeLink: z.boolean().describe("プロダクトへのリンクを付けるか。デモ・機能・ローンチ・事例など、見に行く理由がある投稿だけtrue。"),
+      assetNeeded: z
+        .string()
+        .describe(
+          "この投稿を出す前に作者が用意すべきもの（比較画像・デモ動画・実際の数字など）。日本語1文。本文だけで成り立つなら空文字。",
+        ),
       rationale: z.string().describe("この投稿で何を狙うか、なぜこの切り口か。日本語1〜2文。"),
     }),
   ),
 });
+
+/** Asked of a draft that came back over X's limit, instead of cutting it mid-thought. */
+const ShortenedPosts = z.object({
+  posts: z.array(
+    z.object({
+      index: z.number().int(),
+      hook: z.string(),
+      body: z.string(),
+      cta: z.string(),
+    }),
+  ),
+});
+
+/**
+ * A target length in the audience's language, stated in characters a model
+ * can count. X's weighted limit means a CJK post has half the room, and a
+ * link costs 24 of it. Aimed under the limit on purpose: a model told "280"
+ * writes 320.
+ */
+export function charBudget(language: string, withLink: boolean): number {
+  const cjk = /^(ja|zh|ko)/i.test(language);
+  const room = X_WEIGHTED_LIMIT - (withLink ? LINK_RESERVE : 0);
+  return Math.floor((cjk ? room / 2 : room) * 0.85);
+}
 
 export interface PostDraft {
   slotIndex: number;
@@ -41,6 +70,8 @@ export interface PostDraft {
   /** Without the link; the caller appends the tracking URL once it has a post id. */
   text: string;
   includeLink: boolean;
+  /** What the author has to prepare before posting — a screenshot, a demo. Empty when nothing. */
+  assetNeeded: string;
   rationale: string;
 }
 
@@ -127,7 +158,12 @@ export async function runContentGenerator(input: ContentGeneratorInput, deps: Ag
 
 あなたはこのプロダクトの作者の代わりにXへの投稿を書く。構成は Hook → Body → Value → CTA。
 - 投稿は「${deps.language}」で書く。Grapeの画面の言語とは関係ない。
-- 1投稿はXの上限（${X_WEIGHTED_LIMIT}。日本語などの全角は1字を2と数えるので、日本語なら全体で120字程度まで）に収める。
+- 長さ: hook・body・cta を合わせて ${charBudget(deps.language, false)} 文字以内（リンクを付ける投稿は ${charBudget(deps.language, true)} 文字以内）。
+  超えると投稿できない。1投稿で言うことは1つに絞り、箇条書きは2項目まで。書き終えたら数えて確かめる。
+- 作者がまだやっていないこと（実験・比較・計測・事例・顧客の声・画像や動画）を、やった前提で書かない。
+  「20個のURLで比べた」「先月◯件処理した」のような事実は入力にある場合だけ書く。
+  画像やデモがあると強い投稿なら、本文はそれが無くても成り立つように書き、用意すべきものを assetNeeded に書く。
+- 第三者の記事の言い回しは、自分の体験のようには書かない。一般的な現象として書く。
 - ハッシュタグは0〜1個。絵文字は文体の指定に従う。
 - 宣伝の強さ: ${PROMOTION[intensity]}
 - ${competitorRule(input.policy)}
@@ -158,13 +194,38 @@ ${renderBrandVoice(input.brandVoice)}`;
     user,
   });
 
+  // Over the limit: ask for a shorter version rather than cutting it off —
+  // a post that stops mid-sentence is one nobody would publish.
+  const posts = value.posts.map((post) => ({ ...post, includeLink: post.includeLink && intensity >= 2 }));
+  const overLimit = posts
+    .map((post, index) => ({ post, index }))
+    .filter(({ post }) => xWeightedLength([post.hook, post.body, post.cta].filter(Boolean).join("\n\n")) > X_WEIGHTED_LIMIT - (post.includeLink ? LINK_RESERVE : 0));
+  if (overLimit.length > 0) {
+    const { value: shorter } = await deps.provider.completeStructured({
+      kind: "generate",
+      effort: "low",
+      schemaName: "x_posts_shortened",
+      schema: ShortenedPosts,
+      system,
+      user: [
+        "次の投稿はXの上限を超えている。言いたいことを1つに絞って短くする。内容を足さない。",
+        ...overLimit.map(
+          ({ post, index }) =>
+            `[${index}] 上限 ${charBudget(deps.language, post.includeLink)} 文字\nhook: ${post.hook}\nbody: ${post.body}\ncta: ${post.cta}`,
+        ),
+      ].join("\n\n"),
+    });
+    for (const fix of shorter.posts) {
+      if (posts[fix.index]) posts[fix.index] = { ...posts[fix.index], hook: fix.hook, body: fix.body, cta: fix.cta };
+    }
+  }
+
   const drafts: PostDraft[] = [];
   const used = new Set<number>();
-  for (const post of value.posts) {
+  for (const post of posts) {
     const slot = input.slots[post.slot];
     if (!slot || used.has(post.slot)) continue;
-    const includeLink = post.includeLink && intensity >= 2;
-    const text = assembleText(post.hook, post.body, post.cta, includeLink);
+    const text = assembleText(post.hook, post.body, post.cta, post.includeLink);
     if (!text.trim() || violatesCompetitorPolicy(text, input.policy, input.competitorNames)) continue;
     used.add(post.slot);
     drafts.push({
@@ -176,10 +237,10 @@ ${renderBrandVoice(input.brandVoice)}`;
       body: post.body.trim(),
       cta: post.cta.trim(),
       text,
-      includeLink,
+      includeLink: post.includeLink,
+      assetNeeded: post.assetNeeded.trim(),
       rationale: post.rationale.trim(),
     });
   }
   return drafts;
 }
-

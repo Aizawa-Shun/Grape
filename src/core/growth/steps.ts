@@ -296,6 +296,7 @@ export async function writePosts(
         cta: draft.cta,
         text: link ? `${draft.text}\n${link}` : draft.text,
         rationale: draft.rationale,
+        assetNeeded: draft.assetNeeded || null,
         trackingUrl: link,
         plannedFor: options.plan === false ? null : draft.plannedFor,
       }),

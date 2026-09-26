@@ -112,7 +112,7 @@ export class AnthropicProvider implements LLMProvider {
       betas: [FALLBACK_BETA],
       fallbacks: "default",
       thinking: { type: "adaptive" },
-      output_config: { effort: EFFORT_BY_KIND[req.kind] },
+      output_config: { effort: req.effort ?? EFFORT_BY_KIND[req.kind] },
       system: this.#system(req.system),
       messages: [{ role: "user", content: req.user }],
     }));
@@ -139,7 +139,7 @@ export class AnthropicProvider implements LLMProvider {
       fallbacks: "default",
       thinking: { type: "adaptive" },
       output_config: {
-        effort: EFFORT_BY_KIND[req.kind],
+        effort: req.effort ?? EFFORT_BY_KIND[req.kind],
         format: zodOutputFormat(req.schema),
       },
       system: this.#system(req.system),
@@ -194,8 +194,21 @@ export class AnthropicProvider implements LLMProvider {
 }
 
 /** Same typed-exception ladder as describeAnthropicError, in the shared vocabulary. */
+/**
+ * The API reports an empty credit balance as a plain 400 with no type of its
+ * own, so this one case reads the error body. Worth it: without it, running
+ * out of credit looked like the AI being unreachable, and the person was told
+ * to wait rather than to top up.
+ */
+export function isOutOfCredit(error: unknown): boolean {
+  if (!(error instanceof Anthropic.BadRequestError)) return false;
+  const body = error.error as { error?: { message?: string } } | undefined;
+  return /credit balance/i.test(body?.error?.message ?? "");
+}
+
 function anthropicFailure(error: unknown): LLMFailure {
   if (error instanceof Anthropic.AuthenticationError) return "auth";
+  if (isOutOfCredit(error)) return "billing";
   if (error instanceof Anthropic.RateLimitError) return "rate_limited";
   if (error instanceof Anthropic.APIConnectionTimeoutError) return "timeout";
   if (error instanceof Anthropic.APIConnectionError) return "unreachable";

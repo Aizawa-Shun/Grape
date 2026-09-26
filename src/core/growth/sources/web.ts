@@ -1,9 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 import { getLlmApiKey } from "@/core/auth/users";
+import { isOutOfCredit } from "@/core/llm/anthropic";
 import { assertWithinBudget, recordCall } from "@/core/llm/budget";
 import { LLMError, type Usage } from "@/core/llm/types";
 import { currentSettings } from "@/core/settings";
+import type { Database } from "@/db/client";
 import type { SourceRef } from "@/db/schema";
 import { currentUserId } from "@/server/context";
 
@@ -46,6 +48,8 @@ export interface WebResearchRequest {
   maxSearches: number;
   allowedDomains?: string[];
   productId?: string;
+  /** How hard to think while searching. Finding posts needs less than weighing a market. */
+  effort?: "low" | "medium" | "high";
 }
 
 export interface WebResearcher {
@@ -112,14 +116,16 @@ export class AnthropicWebResearcher implements WebResearcher {
   readonly name = "anthropic-web-search";
   readonly #client: Anthropic;
   readonly #model: string;
+  readonly #database: Database | undefined;
 
-  constructor(options: { apiKey: string; model: string }) {
+  constructor(options: { apiKey: string; model: string; database?: Database }) {
     this.#model = options.model;
+    this.#database = options.database;
     this.#client = new Anthropic({ apiKey: options.apiKey, timeout: RESEARCH_TIMEOUT_MS, maxRetries: 1 });
   }
 
   async research(req: WebResearchRequest): Promise<WebResearchResult> {
-    await assertWithinBudget();
+    await assertWithinBudget(this.#database);
 
     const tool = {
       type: "web_search_20260209" as const,
@@ -142,7 +148,7 @@ export class AnthropicWebResearcher implements WebResearcher {
           betas: [FALLBACK_BETA],
           fallbacks: "default",
           thinking: { type: "adaptive" },
-          output_config: { effort: "medium" },
+          output_config: { effort: req.effort ?? "medium" },
           system: [{ type: "text", text: req.instructions, cache_control: { type: "ephemeral" } }],
           tools: [tool],
           messages,
@@ -168,6 +174,8 @@ export class AnthropicWebResearcher implements WebResearcher {
         this.name,
         error instanceof Anthropic.AuthenticationError
           ? "auth"
+          : isOutOfCredit(error)
+            ? "billing"
           : error instanceof Anthropic.RateLimitError
             ? "rate_limited"
             : error instanceof Anthropic.APIConnectionTimeoutError
@@ -186,7 +194,7 @@ export class AnthropicWebResearcher implements WebResearcher {
           usage,
           productId: req.productId,
           extraCostUsd: searches * WEB_SEARCH_COST_USD,
-        });
+        }, this.#database);
       }
     }
 

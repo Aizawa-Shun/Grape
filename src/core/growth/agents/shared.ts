@@ -68,7 +68,9 @@ export function cleanList(items: string[], max: number): string[] {
 export const percent = z.preprocess(
   (value) => {
     if (typeof value !== "number" || !Number.isFinite(value)) return value;
-    const scaled = value > 0 && value <= 1 ? value * 100 : value;
+    // Only a genuine fraction (0.87) is read as a 0–1 answer. An integer 1 is
+    // "1%" — scaling it made an unrelated post come back as 100% relevant.
+    const scaled = value > 0 && value < 1 ? value * 100 : value;
     return Math.min(100, Math.max(0, Math.round(scaled)));
   },
   z.number().int().min(0).max(100),

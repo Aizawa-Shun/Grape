@@ -22,13 +22,31 @@ interface Rate {
   cacheWrite: number;
 }
 
+/** Anthropic's cache multipliers: reads 0.1x input, 5-minute writes 1.25x input. */
+function claude(inputPerMTok: number, outputPerMTok: number): Rate {
+  const input = inputPerMTok / 1e6;
+  return { input, output: outputPerMTok / 1e6, cacheRead: input * 0.1, cacheWrite: input * 1.25 };
+}
+
+/**
+ * Most specific prefix first — `claude-opus-4-8` must match its own row
+ * before the older `claude-opus-4` one. The first row is the most expensive
+ * and is also the fallback (see FALLBACK_RATE).
+ */
 const RATES: [prefix: string, rate: Rate][] = [
-  // Anthropic. Cache read/write multipliers (0.1x / 1.25x of input) are
-  // consistent across Claude models, so applied to whatever input price
-  // matches the prefix rather than repeated per row.
-  ["claude-opus", { input: 15e-6, output: 75e-6, cacheRead: 1.5e-6, cacheWrite: 18.75e-6 }],
-  ["claude-sonnet", { input: 3e-6, output: 15e-6, cacheRead: 0.3e-6, cacheWrite: 3.75e-6 }],
-  ["claude-haiku", { input: 0.8e-6, output: 4e-6, cacheRead: 0.08e-6, cacheWrite: 1e-6 }],
+  // Anthropic list prices, 2026-09.
+  ["claude-fable", claude(10, 50)],
+  ["claude-mythos", claude(10, 50)],
+  ["claude-opus-5-5", claude(4, 20)],
+  ["claude-opus-5", claude(5, 25)],
+  ["claude-opus-4-8", claude(5, 25)],
+  ["claude-opus-4-7", claude(5, 25)],
+  ["claude-opus-4-6", claude(5, 25)],
+  ["claude-opus-4-5", claude(5, 25)],
+  ["claude-opus", claude(15, 75)],
+  ["claude-sonnet-5", claude(2, 10)],
+  ["claude-sonnet", claude(3, 15)],
+  ["claude-haiku", claude(1, 5)],
 
   // OpenAI-compatible. Only meaningful against the real OpenAI endpoint — a
   // local vLLM/llama.cpp server behind this adapter costs nothing to run, but

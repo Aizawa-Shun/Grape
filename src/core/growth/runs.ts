@@ -27,7 +27,7 @@ export const RUN_LEASE_MS = 5 * 60 * 1000;
 export const MAX_STEP_ATTEMPTS = 2;
 
 /** Failures a retry cannot fix: the owner's setup, not a transient fault. */
-const NOT_RETRYABLE = new Set(["LLM_NOT_CONFIGURED", "LLM_BUDGET_EXCEEDED", "LLM_AUTH", "LLM_REFUSED", "NOT_FOUND", "CONFLICT", "POLICY_BLOCKED"]);
+const NOT_RETRYABLE = new Set(["LLM_NOT_CONFIGURED", "LLM_BUDGET_EXCEEDED", "LLM_BILLING", "LLM_AUTH", "LLM_REFUSED", "NOT_FOUND", "CONFLICT", "POLICY_BLOCKED"]);
 
 /** Thrown by a step with nothing to do. Recorded as skipped, with the reason, not as a failure. */
 export class StepSkipped extends Error {

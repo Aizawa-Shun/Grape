@@ -99,6 +99,10 @@ const CATALOG: Record<ErrorCode, Entry> = {
     status: 502,
     text: "AIがこの内容の作成を断りました。書かせたい内容を変えて、もう一度試してください。",
   },
+  LLM_BILLING: {
+    status: 402,
+    text: "AIサービスのアカウントのクレジット残高が足りません。AIの提供元（Anthropicなど）の管理画面でチャージしてから、もう一度お試しください。",
+  },
   LLM_BUDGET_EXCEEDED: {
     status: 402,
     text: "今月のAI利用の上限額に達しました。設定画面で上限額を確認するか、来月まで待ってください。",

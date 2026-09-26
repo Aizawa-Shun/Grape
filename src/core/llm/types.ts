@@ -57,6 +57,12 @@ export interface CompletionRequest {
   /** Volatile per-call content: this window's metrics, page text, the question. */
   user: string;
   maxTokens?: number;
+  /**
+   * How hard to think, when the call knows better than its kind: a list of
+   * search phrases needs far less than a strategy, though both are "research".
+   * Providers without such a control ignore it.
+   */
+  effort?: Effort;
 }
 
 export interface StructuredCompletionRequest<T> extends CompletionRequest {
@@ -104,7 +110,9 @@ export type LLMFailure =
   | "refused"
   | "server_error"
   /** Grape's own spend guard refused the call before it reached the model. */
-  | "budget_exceeded";
+  | "budget_exceeded"
+  /** The provider account itself is out of credit — the owner's to top up, not Grape's to retry. */
+  | "billing";
 
 /** Shared by the adapters that only have an HTTP status to go on. */
 export function failureForStatus(status: number): LLMFailure {

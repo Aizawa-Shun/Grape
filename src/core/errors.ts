@@ -35,6 +35,8 @@ export const ERROR_CODES = [
   "LLM_BAD_OUTPUT",
   "LLM_REFUSED",
   "LLM_BUDGET_EXCEEDED",
+  /** The AI provider account has run out of credit. */
+  "LLM_BILLING",
   /**
    * Nothing usable is on hand yet to make this call: no LLM_PROVIDER selected
    * at the instance level, no signed-in account, or — now that each account
@@ -89,6 +91,7 @@ const LLM_FAILURE_CODES = {
   refused: "LLM_REFUSED",
   server_error: "LLM_UNREACHABLE",
   budget_exceeded: "LLM_BUDGET_EXCEEDED",
+  billing: "LLM_BILLING",
 } as const;
 
 const CHANNEL_FAILURE_CODES = {

@@ -118,6 +118,13 @@ export function PostCard({ post, viaX, dryRun, xConfigured, attribution }: PostC
         <p className="text-sm whitespace-pre-line">{post.text}</p>
       )}
 
+      {post.assetNeeded && editable && (
+        <p className="rounded-md border border-attention-border bg-attention-bg px-3 py-2 text-xs text-attention">
+          <span className="font-medium">投稿前に用意するもの: </span>
+          {post.assetNeeded}
+        </p>
+      )}
+
       <p className="text-xs text-text-muted">
         <span className="font-medium">なぜこの案か: </span>
         {post.rationale}

@@ -104,6 +104,7 @@ const ANSWERS: Record<string, Answer> = {
         body: "最初の10人は、同じ悩みを書いている人への返信から来ました。",
         cta: "",
         includeLink: slot === 0,
+        assetNeeded: "",
         rationale: "問題から入る",
       })),
     };

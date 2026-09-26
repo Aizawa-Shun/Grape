@@ -14,6 +14,7 @@
     "test:emulators": "firebase emulators:exec --only auth,firestore --project demo-grape \"vitest run\"",
     "db:prune": "tsx src/db/prune.ts",
     "loop:tick": "tsx src/db/loop-tick.ts",
+    "growth:eval": "tsx src/core/growth/eval.ts",
     "tunnel": "cloudflared tunnel --url http://localhost:3000",
     "db:import-sqlite": "tsx src/db/import-sqlite.ts"
   },

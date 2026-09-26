@@ -70,3 +70,12 @@ describe("scoreCandidates", () => {
     expect(scored[0].icpName).toBeNull();
   });
 });
+
+describe("relevance scale", () => {
+  it("reads an integer 1 as 1%, not as a fraction meaning 100%", async () => {
+    const { percent } = await import("./shared");
+    expect(percent.parse(1)).toBe(1);
+    expect(percent.parse(0.87)).toBe(87);
+    expect(percent.parse(140)).toBe(100);
+  });
+});

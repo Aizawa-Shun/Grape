@@ -131,9 +131,30 @@ const SCORE_SUFFIX = `
 
 reasons は必ず書く。スコアの根拠にならない一般論は書かない。${COMMON_RULES}`;
 
-const WEB_INSTRUCTIONS = `Find recent public posts (last 30 days if possible) on Reddit, forums, Q&A sites
-and X where a person describes the problem below or asks for a tool to solve it.
-For each post, quote the person's own words and cite it. Only real posts; no summaries of articles.`;
+const WEB_INSTRUCTIONS = `You look for real people, in public conversations, who have the problem below and
+are asking about it — a question, a complaint, a request for a tool or an alternative.
+
+Search community threads, not articles: Hacker News, Indie Hackers, dev.to discussions,
+GitHub issues and discussions, X, Product Hunt discussions. Prefer the last few months.
+
+For every person you find, quote their own words from the post (one or two sentences, verbatim)
+and cite the page. One quote per person. Skip vendor blog posts, listicles, documentation and
+marketing pages: they are not people asking for help. Do not summarise; quote.`;
+
+/**
+ * Where people talk to each other, rather than publish. Articles are not
+ * opportunities. Reddit and Stack Overflow would belong here but block
+ * Anthropic's fetcher, and naming a blocked domain fails the whole request.
+ */
+export const CONVERSATION_DOMAINS = [
+  "news.ycombinator.com",
+  "indiehackers.com",
+  "dev.to",
+  "github.com",
+  "x.com",
+  "twitter.com",
+  "producthunt.com",
+];
 
 export interface OpportunityFinderDeps extends AgentDeps {
   sources: ConversationSource[];
@@ -154,6 +175,7 @@ export async function runOpportunityFinder(deps: OpportunityFinderDeps): Promise
   const { value: plan } = await deps.provider.completeStructured({
     kind: "research",
     schemaName: "opportunity_search_plan",
+    effort: "low",
     schema: SearchPlan,
     system: deps.system + PLAN_SUFFIX,
     user: [
@@ -174,7 +196,9 @@ export async function runOpportunityFinder(deps: OpportunityFinderDeps): Promise
     if (!source.available()) continue;
     try {
       const found = await source.search(source.name === "hackernews" ? english : phrases, {
-        sinceDays: source.name === "x" ? 7 : 30,
+        // X's recent search only reaches back 7 days. Hacker News is sparse
+        // for any one niche, so it gets a wider window than a feed would.
+        sinceDays: source.name === "x" ? 7 : 90,
         limit: 30,
         language: source.name === "x" ? deps.language : undefined,
       });
@@ -189,8 +213,10 @@ export async function runOpportunityFinder(deps: OpportunityFinderDeps): Promise
     try {
       const result = await deps.web.research({
         instructions: WEB_INSTRUCTIONS,
-        question: `${deps.system}\n\nSearch phrases: ${phrases.join(" / ")}`,
+        question: `${deps.system}\n\nThe people we look for: ${deps.icps.map((icp) => `${icp.name} — ${icp.problem}`).join("; ")}\nHow they put it: ${phrases.join(" / ")}`,
         maxSearches: 4,
+        allowedDomains: CONVERSATION_DOMAINS,
+        effort: "low",
         productId: deps.productId,
       });
       const found = result.citations

@@ -155,7 +155,7 @@ export async function runCompetitorAnalyzer(deps: CompetitorAnalyzerDeps): Promi
         .research({
           instructions: WEB_INSTRUCTIONS,
           question: `${deps.system}\n\nKnown similar services: ${deps.similarServices.join(", ") || "(none)"}`,
-          maxSearches: 5,
+          maxSearches: 4,
           productId: deps.productId,
         })
         .catch(() => null)
@@ -164,6 +164,7 @@ export async function runCompetitorAnalyzer(deps: CompetitorAnalyzerDeps): Promi
   const { value: found } = await deps.provider.completeStructured({
     kind: "research",
     schemaName: "competitor_candidates",
+    effort: "low",
     schema: CompetitorCandidates,
     system: deps.system + CANDIDATE_SUFFIX,
     user: [

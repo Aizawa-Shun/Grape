@@ -1,7 +1,7 @@
 import { AppError } from "@/core/errors";
 import type { LLMProvider } from "@/core/llm";
 
-import { SaasAnalysisSchema, type SaasAnalysis } from "./analysis";
+import { SaasJudgmentSchema, SaasReadingSchema, type SaasAnalysis } from "./analysis";
 import type { CrawledPage } from "./crawl";
 import { hasEvidence } from "./extract";
 
@@ -27,6 +27,15 @@ import { hasEvidence } from "./extract";
 /** Both halves of the prompt are large; a truncated answer is a failed extraction. */
 const MAX_PAGE_CHARS = 6_000;
 const MAX_PAGES_IN_PROMPT = 8;
+/**
+ * The judgment half re-reads the pages with less body text: it already has
+ * the reading, and needs the pages for the scorecard's reasons and for
+ * quotes — which headings, CTAs and the opening of each page carry. Measured
+ * on a real site, the two halves were ~37k and ~41k input tokens, and the
+ * prompt cache did not carry across them (the output schema differs), so
+ * this is where registration's cost is.
+ */
+const JUDGMENT_PAGE_CHARS = 2_500;
 
 const ANALYSIS_SYSTEM = `あなたはSaaSアナリストである。あるWebサービスの公開ページを読み、
 そのサービスを理解するための構造化された分析と、現状の採点を作る。
@@ -91,7 +100,7 @@ insights の weaknesses（弱み）と threats（脅威）について:
 - threats は、外部の要因（競合・無料の代替手段・市場の変化）。サイトの欠点は書かない。`;
 
 /** One page, flattened into the parts of it that carry meaning. */
-function renderPage(page: CrawledPage): string {
+function renderPage(page: CrawledPage, maxChars: number = MAX_PAGE_CHARS): string {
   const meta = Object.entries(page.meta)
     .filter(([key]) => /^(description|og:|twitter:|manifest:|ld:)/.test(key))
     .map(([key, value]) => `  ${key}: ${value}`)
@@ -109,13 +118,13 @@ function renderPage(page: CrawledPage): string {
     page.ctas.length > 0 ? `ボタン・CTA: ${page.ctas.join(" / ")}` : null,
     page.prices.length > 0 ? `価格らしき表記: ${page.prices.join(" / ")}` : null,
     "本文:",
-    page.text.slice(0, MAX_PAGE_CHARS),
+    page.text.slice(0, maxChars),
   ]
     .filter(Boolean)
     .join("\n");
 }
 
-export function buildAnalysisInput(pages: CrawledPage[]): string {
+export function buildAnalysisInput(pages: CrawledPage[], maxChars: number = MAX_PAGE_CHARS): string {
   const readable = pages.filter(hasEvidence).slice(0, MAX_PAGES_IN_PROMPT);
   const unreadable = pages.filter((page) => !hasEvidence(page));
 
@@ -128,7 +137,7 @@ export function buildAnalysisInput(pages: CrawledPage[]): string {
 
   return `以下は対象サービスの公開ページです。複数ページの情報を統合して、1つの分析を作ってください。
 
-${readable.map(renderPage).join("\n\n---\n\n")}${notes}`;
+${readable.map((page) => renderPage(page, maxChars)).join("\n\n---\n\n")}${notes}`;
 }
 
 export async function analyzeSaas(
@@ -146,13 +155,41 @@ export async function analyzeSaas(
     );
   }
 
-  const { value } = await provider.completeStructured({
+  // Two calls, because the whole schema is too large for Anthropic's
+  // grammar compiler (see SaasReadingSchema). The second is handed the
+  // first's answer, so the map and the scorecard are about the same service
+  // the reading describes, and reads shorter page text (JUDGMENT_PAGE_CHARS).
+  const system = `${ANALYSIS_SYSTEM}\n\n# 入力\n${buildAnalysisInput(pages)}`;
+  const judgmentSystem = `${ANALYSIS_SYSTEM}\n\n# 入力\n${buildAnalysisInput(pages, JUDGMENT_PAGE_CHARS)}`;
+
+  const { value: reading } = await provider.completeStructured({
     kind: "extract",
-    schemaName: "saas_analysis",
-    schema: SaasAnalysisSchema,
-    system: ANALYSIS_SYSTEM,
-    user: buildAnalysisInput(pages),
+    schemaName: "saas_reading",
+    schema: SaasReadingSchema,
+    system,
+    user:
+      "前半として、overview・service・targetUsers・business・market（category / industry / similarServices）・primaryLanguage を出力する。" +
+      "positioning・insights・assessment・evidence はこのあと別に聞くので、ここでは出力しない。",
   });
 
-  return value;
+  const { value: judgment } = await provider.completeStructured({
+    kind: "extract",
+    schemaName: "saas_judgment",
+    schema: SaasJudgmentSchema,
+    system: judgmentSystem,
+    user: [
+      "後半として、positioning（market.positioning の図）・insights・assessment・evidence を出力する。",
+      "前半で読み取った内容は次のとおり。これと矛盾させない。positioning.others には similarServices と同じものを置く。",
+      "",
+      JSON.stringify(reading),
+    ].join("\n"),
+  });
+
+  return {
+    ...reading,
+    market: { ...reading.market, positioning: judgment.positioning },
+    insights: judgment.insights,
+    assessment: judgment.assessment,
+    evidence: judgment.evidence,
+  };
 }

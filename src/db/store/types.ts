@@ -95,6 +95,7 @@ export interface Defaults {
     | "runId"
     | "pillar"
     | "draftText"
+    | "assetNeeded"
     | "opportunityId"
     | "replyToUrl"
     | "replyToExternalId"
@@ -202,6 +203,7 @@ export function defaultsFor(name: CollectionName, now: Date): Record<string, unk
         runId: null,
         pillar: null,
         draftText: null,
+        assetNeeded: null,
         opportunityId: null,
         replyToUrl: null,
         replyToExternalId: null,

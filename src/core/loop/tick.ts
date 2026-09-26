@@ -80,7 +80,7 @@ async function defaultRediagnose(productId: string): Promise<void> {
 }
 
 /** Reasons a re-diagnosis is skipped rather than failed — the owner's setup, not a fault. */
-const SKIP_CODES = new Set(["LLM_NOT_CONFIGURED", "LLM_BUDGET_EXCEEDED"]);
+const SKIP_CODES = new Set(["LLM_NOT_CONFIGURED", "LLM_BUDGET_EXCEEDED", "LLM_BILLING"]);
 
 let running = false;
 

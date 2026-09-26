@@ -317,6 +317,42 @@ export const SaasAnalysisSchema = z.object({
 });
 
 export type SaasAnalysis = z.infer<typeof SaasAnalysisSchema>;
+
+/**
+ * The analysis, asked for in two halves (core/context/analyze.ts).
+ *
+ * Anthropic compiles an output schema into a grammar and refuses one that is
+ * too large — and the whole analysis, fifteen status-carrying claims plus the
+ * map, the scorecard and the evidence, is over that line (a 400: "The
+ * compiled grammar is too large"). Registration caught the error and quietly
+ * fell back to the rule-based reading, so on Anthropic the full analysis was
+ * never actually produced. Each half compiles; together they are exactly
+ * SaasAnalysisSchema.
+ */
+const shape = SaasAnalysisSchema.shape;
+const marketShape = shape.market.shape;
+
+/** What the site says the service is. */
+export const SaasReadingSchema = z.object({
+  overview: shape.overview,
+  service: shape.service,
+  targetUsers: shape.targetUsers,
+  business: shape.business,
+  market: z.object({
+    category: marketShape.category,
+    industry: marketShape.industry,
+    similarServices: marketShape.similarServices,
+  }),
+  primaryLanguage: shape.primaryLanguage,
+});
+
+/** The judgment on top of that reading: where it stands, how strong it is, and the citations. */
+export const SaasJudgmentSchema = z.object({
+  positioning: marketShape.positioning,
+  insights: shape.insights,
+  assessment: shape.assessment,
+  evidence: shape.evidence,
+});
 export type AnalysisEvidence = SaasAnalysis["evidence"][number];
 export type SaasAssessment = SaasAnalysis["assessment"];
 

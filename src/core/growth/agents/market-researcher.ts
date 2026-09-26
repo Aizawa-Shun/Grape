@@ -118,6 +118,7 @@ export async function runMarketResearcher(deps: MarketResearcherDeps): Promise<M
   const { value: plan } = await deps.provider.completeStructured({
     kind: "research",
     schemaName: "market_query_plan",
+    effort: "low",
     schema: QueryPlan,
     system: deps.system + PLAN_SUFFIX,
     user: `検索語の言語: ${deps.language}`,
@@ -130,7 +131,7 @@ export async function runMarketResearcher(deps: MarketResearcherDeps): Promise<M
           .research({
             instructions: WEB_INSTRUCTIONS,
             question: `${deps.system}\n\n# Search for\n${plan.queries.map((q) => `- ${q}`).join("\n")}\n\nAudience language: ${deps.language}`,
-            maxSearches: 6,
+            maxSearches: 5,
             productId: deps.productId,
           })
           .catch(() => null)
