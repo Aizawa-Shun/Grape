@@ -64,11 +64,11 @@ const growthMatch = (suffix: string) => (pathname: string, id: string | null) =>
   Boolean(id) && pathname === `/products/${id}/growth${suffix}`;
 
 const GROWTH: Item[] = [
-  { label: "グロース", icon: "growth", href: growthHref(""), match: growthMatch(""), hint: "目標・見込み客・次の一手" },
-  { label: "投稿と返信", icon: "posts", href: growthHref("/posts"), match: growthMatch("/posts"), hint: "承認待ちの案と、出したものの結果" },
-  { label: "市場とICP", icon: "research", href: growthHref("/research"), match: growthMatch("/research"), hint: "プロダクトの理解・市場・競合・ICP" },
-  { label: "戦略", icon: "strategy", href: growthHref("/strategy"), match: growthMatch("/strategy"), hint: "ポジショニング・投稿の配分・学んだこと" },
-  { label: "自動化と安全", icon: "shield", href: growthHref("/settings"), match: growthMatch("/settings"), hint: "承認モード・上限・文体" },
+  { label: "マーケティング", icon: "growth", href: growthHref(""), match: growthMatch(""), hint: "Grapeがいま考えていること・次にやること" },
+  { label: "投稿", icon: "posts", href: growthHref("/posts"), match: growthMatch("/posts"), hint: "これからのネタ・承認待ち・出した結果" },
+  { label: "製品と市場", icon: "research", href: growthHref("/brain"), match: growthMatch("/brain"), hint: "製品の理解（事実と推測）・市場・競合" },
+  { label: "戦略と学び", icon: "strategy", href: growthHref("/strategy"), match: growthMatch("/strategy"), hint: "誰に・何として・どう売るか、検証中の仮説と学び" },
+  { label: "目標と設定", icon: "shield", href: growthHref("/settings"), match: growthMatch("/settings"), hint: "目標・計測・承認モード・文体" },
 ];
 
 const MANAGE: Item[] = [
@@ -192,7 +192,7 @@ function Group({
         const badge =
           item.label === "診断とタスク" && openTasks > 0
             ? openTasks
-            : item.label === "投稿と返信" && pendingApprovals > 0
+            : item.label === "投稿" && pendingApprovals > 0
               ? pendingApprovals
               : null;
 

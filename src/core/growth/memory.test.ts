@@ -8,52 +8,46 @@ import { buildAgentMemory, isRealRewrite, renderMemory } from "./memory";
 const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000);
 
 async function post(conn: Database, overrides: Record<string, unknown>) {
-  return conn.posts.insert({
+  return conn.posts.insert({ productId: "p1", kind: "post", postType: "educational", hook: "h", body: "", cta: "", text: "text", rationale: "", ...overrides });
+}
+
+async function learning(conn: Database, direction: "works" | "fails" | "unclear", statement: string, status: "active" | "superseded" = "active") {
+  return conn.learnings.insert({
     productId: "p1",
-    kind: "post",
-    postType: "educational",
-    hook: "hook",
-    body: "",
-    cta: "",
-    text: "text",
-    rationale: "",
-    ...overrides,
+    kind: "pain",
+    direction,
+    statement,
+    explanation: "e",
+    confidence: "medium",
+    evidence: { posts: 5, impressions: 1000, engagements: 20, visits: 10, signups: 1, lift: 0.4 },
+    status,
   });
 }
 
 describe("buildAgentMemory", () => {
-  it("remembers what brought people, what did nothing, what was refused and how drafts were rewritten", async () => {
+  it("remembers decided learnings, refusals and rewrites — not unclear or superseded learnings", async () => {
     const conn = createMemoryStore();
-    await conn.products.insert({ id: "p1", userId: "u", url: "https://x.example/", name: "X", keyEventName: "signup" });
-    const good = await post(conn, { hook: "問題から入る", status: "published", publishedAt: daysAgo(3) });
-    await post(conn, { hook: "機能の紹介", status: "published", publishedAt: daysAgo(3) });
-    // Published an hour ago: too soon to count as a failure.
-    await post(conn, { hook: "今日の投稿", status: "published", publishedAt: new Date(Date.now() - 3_600_000) });
+    await learning(conn, "works", "「マーケが苦手」の痛みが効く");
+    await learning(conn, "unclear", "形式はまだ不明");
+    await learning(conn, "fails", "古い学び", "superseded");
     await post(conn, { status: "rejected", text: "買ってください", error: "宣伝っぽい", decidedAt: daysAgo(1) });
     await post(conn, { kind: "reply", status: "approved", draftText: "ぜひ当社のツールを！", text: "自分はこうやって解決しました。", decidedAt: daysAgo(1) });
     await post(conn, { status: "approved", draftText: "同じ  文", text: "同じ 文", decidedAt: daysAgo(1) });
-    await conn.events.insert({ productId: "p1", anonId: "a", sessionId: "s", name: "pageview", utm: { utm_content: good.id }, ts: daysAgo(2) });
 
     const memory = await buildAgentMemory("p1", conn);
-    expect(memory.worked.map((p) => p.hook)).toEqual(["問題から入る"]);
-    expect(memory.didNotWork.map((p) => p.hook)).toEqual(["機能の紹介"]);
+    expect(memory.learnings.map((l) => l.statement)).toEqual(["「マーケが苦手」の痛みが効く"]);
     expect(memory.rejected).toEqual([{ kind: "post", text: "買ってください", reason: "宣伝っぽい" }]);
     expect(memory.rewrites).toHaveLength(1);
 
     const forPosts = renderMemory(memory, "post");
-    expect(forPosts).toContain("問題から入る");
+    expect(forPosts).toContain("マーケが苦手");
     expect(forPosts).toContain("宣伝っぽい");
     expect(forPosts).not.toContain("当社のツール");
-
-    const forReplies = renderMemory(memory, "reply");
-    expect(forReplies).toContain("当社のツール");
-    expect(forReplies).not.toContain("問題から入る");
+    expect(renderMemory(memory, "reply")).toContain("当社のツール");
   });
 
   it("renders nothing when there is nothing to remember", async () => {
-    const conn = createMemoryStore();
-    await conn.products.insert({ id: "p1", userId: "u", url: "https://x.example/", name: "X" });
-    expect(renderMemory(await buildAgentMemory("p1", conn), "post")).toBe("");
+    expect(renderMemory(await buildAgentMemory("p1", createMemoryStore()), "post")).toBe("");
   });
 });
 

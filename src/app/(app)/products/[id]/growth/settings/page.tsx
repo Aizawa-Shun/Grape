@@ -11,7 +11,7 @@ import { findOwnedProduct } from "@/core/product/ownership";
 import { loadSettings } from "@/core/settings";
 import { requireUser } from "@/server/auth/current-user";
 
-import { BrandVoiceForm, GoalForm, PolicyForm } from "./forms";
+import { BrandVoiceForm, EventsForm, GoalForm, PolicyForm } from "./forms";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +26,7 @@ export default async function GrowthSettingsPage({ params }: { params: Promise<{
 
   return (
     <Page>
-      <PageHeader title="自動化と安全" description="目標、AIに任せる範囲、出すものの上限と文体を決めます。" />
+      <PageHeader title="目標と設定" description="目標、何を数えるか、AIに任せる範囲、出すものの上限と文体を決めます。" />
 
       {settings.GRAPE_ACTION_DRY_RUN && (
         <Callout>
@@ -36,6 +36,14 @@ export default async function GrowthSettingsPage({ params }: { params: Promise<{
 
       <Section id="goal" title="目標">
         <GoalForm productId={id} initial={{ metric: goal?.metric ?? DEFAULT_GOAL.metric, target: goal?.target ?? DEFAULT_GOAL.target, days }} />
+      </Section>
+
+      <Section id="events" title="何を数えるか" description="投稿から来た人が、登録し、使い続け、お金を払ったかを数えるためのイベント名です。">
+        <EventsForm
+          productId={id}
+          initial={{ signupEventName: product.signupEventName ?? "", paidEventName: product.paidEventName ?? "" }}
+          activation={product.keyEventName}
+        />
       </Section>
 
       <Section title="承認モードと安全のルール" description="上限と禁止ワードは、あなたが承認するときにも適用されます。時間帯と関連度の下限は、AIが自分で実行するときだけ適用されます。">

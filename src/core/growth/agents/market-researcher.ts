@@ -3,6 +3,7 @@ import { z } from "zod";
 import { INSIGHT_KINDS, type InsightKind, type SourceRef } from "@/db/schema";
 
 import type { ConversationCandidate, ConversationSource } from "../sources/types";
+import { cleanSuggestions, type SuggestSource } from "../sources/suggest";
 import type { WebResearcher, WebResearchResult } from "../sources/web";
 import { cleanList, COMMON_RULES, groundedSources, renderSources, type AgentDeps } from "./shared";
 
@@ -21,8 +22,12 @@ import { cleanList, COMMON_RULES, groundedSources, renderSources, type AgentDeps
  * is never shown as though somebody had checked it.
  */
 
-/** What research may report. Competitor moves come only from the watch step's diff, never from a model. */
-const RESEARCH_KINDS = INSIGHT_KINDS.filter((kind) => kind !== "competitor_move") as [InsightKind, ...InsightKind[]];
+/**
+ * What a model may report. Competitor moves come only from the watch step's
+ * diff, and search demand only from the search box itself — neither is
+ * something a model can be trusted to have seen.
+ */
+const RESEARCH_KINDS = INSIGHT_KINDS.filter((kind) => kind !== "competitor_move" && kind !== "search_demand") as [InsightKind, ...InsightKind[]];
 
 export const QueryPlan = z.object({
   queries: z.array(z.string()).describe("ユーザーが問題を検索するときの語句を4〜6件。指定言語で。"),
@@ -40,7 +45,8 @@ export const MarketResearchOutput = z.object({
           .enum(RESEARCH_KINDS)
           .describe(
             "pain=悩み / phrase=ユーザーがよく使う表現 / complaint=既存手段への不満 / desired_feature=求められている機能 / " +
-              "unmet_need=満たされていないニーズ / trend=話題になっているテーマ / gap=まだ訴求されていない領域",
+              "unmet_need=満たされていないニーズ / trend=話題になっているテーマ / " +
+              "community=見込みユーザーが集まって話している場所（名前とURLを statement に） / gap=まだ訴求されていない領域",
           ),
         statement: z.string().describe("発見を1〜2文で。である調。"),
         userPhrases: z
@@ -49,7 +55,7 @@ export const MarketResearchOutput = z.object({
         sourceUrls: z.array(z.string()).describe("根拠にしたURL。下の「取得したソース」にあるものだけ。無ければ空。"),
       }),
     )
-    .describe("市場調査の発見を8〜14件。pain・phrase・complaintを中心に、各種類を偏らせない。"),
+    .describe("市場調査の発見を10〜16件。pain・phrase・complaintを中心に、communityを2件以上含める。各種類を偏らせない。"),
 });
 export type MarketResearchOutput = z.infer<typeof MarketResearchOutput>;
 
@@ -111,6 +117,8 @@ function renderCandidates(candidates: ConversationCandidate[]): string {
 export interface MarketResearcherDeps extends AgentDeps {
   web: WebResearcher | null;
   hackerNews: ConversationSource;
+  /** What people type into a search box — a proxy for demand, not a volume. */
+  suggest?: SuggestSource;
   productId?: string;
 }
 
@@ -179,5 +187,29 @@ export async function runMarketResearcher(deps: MarketResearcherDeps): Promise<M
       };
     });
 
-  return { findings, plan, webUsed: Boolean(web), sourcesRead: known.length };
+  const demand = await searchDemand(plan, deps);
+  return { findings: [...findings, ...demand], plan, webUsed: Boolean(web), sourcesRead: known.length };
+}
+
+/**
+ * What people type, for the seed queries: one finding per query that has
+ * suggestions. No model involved — these are read straight from the search
+ * box, so they are grounded by construction.
+ */
+async function searchDemand(plan: QueryPlan, deps: MarketResearcherDeps): Promise<MarketFinding[]> {
+  if (!deps.suggest) return [];
+  const seeds = [
+    ...cleanList(plan.queries, 4).map((query) => ({ query, language: deps.language })),
+    ...cleanList(plan.englishQueries, 3).map((query) => ({ query, language: "en" })),
+  ];
+  const found = await Promise.all(seeds.map(async (seed) => ({ seed, suggestions: cleanSuggestions(seed.query, await deps.suggest!.suggest(seed.query, seed.language)) })));
+  return found
+    .filter(({ suggestions }) => suggestions.length >= 2)
+    .map(({ seed, suggestions }) => ({
+      kind: "search_demand" as const,
+      statement: `「${seed.query}」で、実際に検索されている言い回し（検索ボリュームではなく、Googleの検索候補）。`,
+      userPhrases: suggestions,
+      sources: [{ url: `https://www.google.com/search?q=${encodeURIComponent(seed.query)}`, title: "Google検索候補" }],
+      grounded: true,
+    }));
 }

@@ -10,6 +10,8 @@ const product: Product = {
   url: "https://example.com",
   name: "Widget",
   keyEventName: "signup",
+  signupEventName: null,
+  paidEventName: null,
   setupStatus: "ready",
   setupError: null,
   setupClaimedAt: null,

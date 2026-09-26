@@ -22,7 +22,10 @@ export interface PostCardProps {
   /** X posting credentials exist on this instance. */
   xConfigured: boolean;
   /** Visits and signups the tracking snippet traced back to this post. */
-  attribution: { visits: number; signups: number } | null;
+  /** `signups` is null when no signup event is named: not measured, which is not zero. */
+  attribution: { visits: number; signups: number | null } | null;
+  /** The angle this post tests, when it belongs to an experiment. */
+  hypothesis?: string | null;
 }
 
 function intentUrl(text: string, inReplyTo: string | null): string {
@@ -48,7 +51,7 @@ const METRIC_FIELDS: { key: keyof Omit<PostMetrics, "source">; label: string }[]
  * has explicitly chosen the autonomous mode; and practice mode stops even
  * that. Every draft says why it was written.
  */
-export function PostCard({ post, viaX, dryRun, xConfigured, attribution }: PostCardProps) {
+export function PostCard({ post, viaX, dryRun, xConfigured, attribution, hypothesis = null }: PostCardProps) {
   const router = useRouter();
   const [text, setText] = useState(post.text);
   const [reason, setReason] = useState("");
@@ -87,6 +90,7 @@ export function PostCard({ post, viaX, dryRun, xConfigured, attribution }: PostC
         <Badge>{post.kind === "reply" ? "返信" : "投稿"}</Badge>
         {post.kind === "post" && <span className="text-xs text-text-muted">{POST_TYPE_LABELS[post.postType]}{post.pillar ? ` ・ ${post.pillar}` : ""}</span>}
         {post.plannedFor && <span className="text-xs text-text-subtle">予定 {post.plannedFor}</span>}
+        {hypothesis && <span className="text-xs text-text-subtle">仮説「{hypothesis}」の検証</span>}
         <span className="ml-auto">
           <StatusBadge post={post} />
         </span>
@@ -189,7 +193,7 @@ export function PostCard({ post, viaX, dryRun, xConfigured, attribution }: PostC
             {attribution && (
               <span>
                 サイト訪問 <span className="font-medium tabular-nums text-text">{attribution.visits}</span> ・ 登録{" "}
-                <span className="font-medium tabular-nums text-text">{attribution.signups}</span>
+                <span className="font-medium tabular-nums text-text">{attribution.signups ?? "—"}</span>
               </span>
             )}
             {post.metrics &&
@@ -209,6 +213,7 @@ export function PostCard({ post, viaX, dryRun, xConfigured, attribution }: PostC
 }
 
 function StatusBadge({ post }: { post: Post }) {
+  if (post.status === "idea") return <Badge>ネタ</Badge>;
   if (post.status === "draft") return <Badge tone="attention">承認待ち</Badge>;
   if (post.status === "approved") return <Badge>{post.dryRun ? "練習で承認" : "承認済み・未投稿"}</Badge>;
   if (post.status === "published") return <Badge tone="positive">公開済み</Badge>;

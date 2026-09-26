@@ -40,8 +40,18 @@ export function Field({
 }
 
 /** The shared look for text inputs and textareas, so Field's children stay one line. */
-export const controlClass = cx(
-  "w-full rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-text",
+const controlBase = cx(
+  "rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-text",
   "placeholder:text-text-subtle disabled:opacity-50",
   focusRing,
 );
+
+export const controlClass = cx("w-full", controlBase);
+
+/**
+ * For a control that sits inside a sentence — "30日で 100人" — sized by the
+ * caller. `controlClass` always fills its row, and a width class added after
+ * it does not win against `w-full` (both are one utility; the stylesheet
+ * order decides), so a sentence built from it broke onto four lines.
+ */
+export const inlineControlClass = controlBase;

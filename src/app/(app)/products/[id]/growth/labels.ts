@@ -46,6 +46,22 @@ export const INSIGHT_LABELS = {
   desired_feature: "求められている機能",
   unmet_need: "満たされていないニーズ",
   trend: "話題のテーマ",
+  community: "集まっている場所",
+  search_demand: "検索されている言葉",
   gap: "まだ誰も訴求していない領域",
   competitor_move: "競合の動き",
 } as const;
+
+export const CONFIDENCE_LABELS = { high: "根拠が多い", medium: "根拠あり", low: "根拠が薄い" } as const;
+
+export const HYPOTHESIS_STATUS_LABELS = {
+  testing: "検証中",
+  supported: "支持された",
+  refuted: "否定された",
+  inconclusive: "判断できなかった",
+  retired: "やめた",
+} as const;
+
+export const DIMENSION_LABELS = { pain: "痛み", audience: "相手", message: "訴求", format: "形式" } as const;
+
+export const GOAL_METRIC_LABELS = { visitors: "訪問者", signups: "登録ユーザー", activations: "アクティブユーザー", paid: "有料ユーザー" } as const;

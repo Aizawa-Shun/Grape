@@ -105,6 +105,10 @@ export interface Product {
   name: string;
   /** The event name that means "activated" — see core/data/funnel.ts. */
   keyEventName: string | null;
+  /** The event that means someone signed up. Growth counts signups from it (core/growth/attribution.ts). */
+  signupEventName: string | null;
+  /** The event that means someone paid. */
+  paidEventName: string | null;
   /** How far the crawl-and-read pass has got; see core/product/register.ts. */
   setupStatus: ProductSetupStatus;
   setupError: string | null;
@@ -267,12 +271,20 @@ export interface Setting {
   updatedAt: Date;
 }
 
-// --- ⑥ GROWTH ---------------------------------------------------------------
+// --- ⑥ MARKETING BRAIN ------------------------------------------------------
 //
-// The growth loop that sits beside the funnel loop above: research the market
-// the product lives in, decide who to talk to and what to say, find the people
-// already asking for it, draft what to post or reply, publish on approval, and
-// learn from what the posts actually did. core/growth/ owns all of it.
+// What Grape knows about a product's marketing, and how it comes to know it.
+// The brain is a loop, not a feature list:
+//
+//   Product knowledge ─┐
+//                      ├─► Audience & positioning ─► Strategy ─► Hypotheses
+//   Market knowledge ──┘                                              │
+//        ▲                                                            ▼
+//        └──────────── Learnings ◄── Results ◄── Execution (posts on X)
+//
+// The strategy is a set of claims about what will work, each tested by posts
+// written for it; what the results say is kept as a learning, and learnings
+// change the next strategy. core/growth/ owns all of it.
 //
 // Everything a research step writes carries the `runId` that produced it, so a
 // later run replaces a finding rather than piling a second copy on top of it:
@@ -282,14 +294,19 @@ export const GROWTH_STEP_KINDS = [
   "product",
   "market",
   "competitors",
-  "icp",
+  "audience",
+  "positioning",
   "strategy",
-  "opportunities",
+  "experiments",
+  "ideas",
   "content",
-  "metrics",
-  "performance",
-  "autopilot",
+  "opportunities",
   "watch",
+  "metrics",
+  "measure",
+  "learn",
+  "revise",
+  "autopilot",
 ] as const;
 export type GrowthStepKind = (typeof GROWTH_STEP_KINDS)[number];
 
@@ -331,7 +348,7 @@ export interface GrowthRun {
   finishedAt: Date | null;
 }
 
-export const GOAL_METRICS = ["signups", "visitors"] as const;
+export const GOAL_METRICS = ["visitors", "signups", "activations", "paid"] as const;
 export type GoalMetric = (typeof GOAL_METRICS)[number];
 
 /** "Get 100 new users in 30 days." Progress is counted from events, never typed in. */
@@ -346,9 +363,56 @@ export interface GrowthGoal {
   createdAt: Date;
 }
 
-export interface MarketingAngle {
-  name: string;
-  description: string;
+export type Confidence = "low" | "medium" | "high";
+
+// --- Product knowledge ------------------------------------------------------
+
+/**
+ * Known or assumed — never blurred.
+ *
+ * `known` is a claim with a source: a sentence on the product's own site,
+ * checked by code to really be there (core/growth/knowledge.ts), or something
+ * its owner told Grape. `assumption` is everything else the model worked out —
+ * shown, used, and always labelled as such. What is not known at all is not a
+ * fact but a question (`OpenQuestion`), asked of the owner.
+ */
+export type FactStatus = "known" | "assumption";
+export const FACT_BASES = ["site", "owner", "inference"] as const;
+export type FactBasis = (typeof FACT_BASES)[number];
+
+export interface Evidence {
+  url: string;
+  quote: string;
+}
+
+export interface Fact {
+  text: string;
+  status: FactStatus;
+  basis: FactBasis;
+  evidence: Evidence[];
+}
+
+export const KNOWLEDGE_TOPICS = [
+  "what",
+  "targetUsers",
+  "problems",
+  "benefits",
+  "features",
+  "differentiators",
+  "useCases",
+  "pricing",
+  "proof",
+] as const;
+export type KnowledgeTopic = (typeof KNOWLEDGE_TOPICS)[number];
+
+/** Something marketing needs and the site does not establish — asked of the owner in plain words. */
+export interface OpenQuestion {
+  id: string;
+  topic: KnowledgeTopic;
+  question: string;
+  whyItMatters: string;
+  /** Our best guess, offered to be confirmed or corrected. */
+  guess: string | null;
 }
 
 /** What someone's own writing sounds like, so drafts can sound like them. */
@@ -365,27 +429,29 @@ export interface BrandVoice {
 }
 
 /**
- * The Product Knowledge Base: one per product, keyed by its id. Every growth
- * agent reads it as its stable prompt prefix (core/growth/knowledge.ts). A
- * person can correct it; a re-analysis then leaves the corrected fields alone.
+ * One per product, keyed by its id. Every growth agent reads it as the stable
+ * prefix of its prompt (core/growth/knowledge.ts), with each fact's status.
  */
 export interface ProductKnowledge {
   id: string;
   productId: string;
-  summary: string;
-  problem: string;
-  solution: string;
-  targetUser: string;
-  usp: string[];
-  useCases: string[];
-  features: string[];
-  pricing: string;
-  marketingAngles: MarketingAngle[];
+  what: Fact | null;
+  targetUsers: Fact[];
+  problems: Fact[];
+  benefits: Fact[];
+  features: Fact[];
+  differentiators: Fact[];
+  useCases: Fact[];
+  pricing: Fact[];
+  /** Evidence and proof: numbers, customers, testimonials the product can point to. */
+  proof: Fact[];
+  questions: OpenQuestion[];
   brandVoice: BrandVoice | null;
   contextVersion: number;
-  editedByHuman: boolean;
   updatedAt: Date;
 }
+
+// --- Market knowledge -------------------------------------------------------
 
 export interface SourceRef {
   url: string;
@@ -399,6 +465,8 @@ export const INSIGHT_KINDS = [
   "desired_feature",
   "unmet_need",
   "trend",
+  "community",
+  "search_demand",
   "gap",
   "competitor_move",
 ] as const;
@@ -458,7 +526,17 @@ export interface CompetitorSnapshot {
   ctas: string[];
 }
 
-export interface Icp {
+// --- Audience & positioning -------------------------------------------------
+
+export const SEGMENT_STATUSES = ["hypothesis", "validated", "rejected"] as const;
+export type SegmentStatus = (typeof SEGMENT_STATUSES)[number];
+
+/**
+ * A kind of person worth aiming at — a hypothesis until results say
+ * otherwise. `evidence` lists the market findings it was drawn from, and
+ * `confidence` is counted from them, not asserted.
+ */
+export interface Segment {
   id: string;
   productId: string;
   runId: string;
@@ -467,17 +545,52 @@ export interface Icp {
   role: string;
   companySize: string;
   technicalLevel: string;
+  /** When they meet the problem: the moment that makes it urgent. */
+  situation: string;
   problem: string;
   pain: string;
-  goal: string;
-  buyingTrigger: string;
-  currentAlternatives: string[];
+  /** What they are trying to get done, beyond removing the pain. */
+  motivation: string;
+  currentSolutions: string[];
+  /** Why this segment fits this product. */
+  fitReason: string;
   channels: string[];
   keywords: string[];
-  /** Phrases this person would actually type on X — the search terms. */
+  /** Phrases this person would actually write on X — the search terms. */
   xPhrases: string[];
+  /** Ids of the MarketInsights this segment rests on. */
+  evidence: string[];
+  confidence: Confidence;
+  status: SegmentStatus;
   createdAt: Date;
 }
+
+export interface PositioningBecause {
+  text: string;
+  status: FactStatus;
+}
+
+/** For [target] who [problem], [product] is [solution]. Unlike [alternatives], because [differentiators]. */
+export interface PositioningStatement {
+  segmentId: string;
+  segmentName: string;
+  /** One sentence, for headlines. */
+  oneLiner: string;
+  forWhom: string;
+  problem: string;
+  product: string;
+  alternatives: string[];
+  because: PositioningBecause[];
+}
+
+export interface Positioning extends PositioningStatement {
+  id: string;
+  productId: string;
+  runId: string;
+  createdAt: Date;
+}
+
+// --- Strategy ---------------------------------------------------------------
 
 export const POST_TYPES = [
   "educational",
@@ -505,12 +618,17 @@ export interface ContentPillar {
   postTypes: PostType[];
 }
 
-/** A slot in the week's plan — a content idea before it is written. */
-export interface PlanSlot {
-  day: number;
-  pillar: string;
-  postType: PostType;
-  topic: string;
+/** One focus channel; the rest wait, each with the condition for starting it. */
+export interface StrategyChannel {
+  name: string;
+  role: "focus" | "later";
+  rationale: string;
+  startWhen: string;
+}
+
+export interface StrategyChange {
+  what: string;
+  because: string;
 }
 
 export interface MarketingStrategy {
@@ -518,18 +636,117 @@ export interface MarketingStrategy {
   productId: string;
   runId: string | null;
   version: number;
-  positioning: string;
-  messaging: string[];
+  segmentId: string | null;
+  segmentName: string;
+  positioning: PositioningStatement;
+  coreMessage: string;
+  supportingMessages: string[];
   pillars: ContentPillar[];
-  channels: { name: string; priority: number; rationale: string }[];
-  shortTerm: string[];
-  midTerm: string[];
-  weeklyPlan: PlanSlot[];
+  channels: StrategyChannel[];
+  acquisition: string[];
+  conversion: string[];
+  retentionReferral: string[];
   rationale: string;
-  /** "planner" drafted it from research; "learning" re-weighted it from results. */
-  origin: "planner" | "learning";
+  /** What this version changed from the last, and which result made it change. */
+  changes: StrategyChange[];
+  /** "planner" drafted it from research; "revision" rewrote it from learnings. */
+  origin: "planner" | "revision";
   createdAt: Date;
 }
+
+// --- Hypotheses & learnings -------------------------------------------------
+
+export const HYPOTHESIS_DIMENSIONS = ["pain", "audience", "message", "format"] as const;
+export type HypothesisDimension = (typeof HYPOTHESIS_DIMENSIONS)[number];
+
+export const HYPOTHESIS_STATUSES = ["testing", "supported", "refuted", "inconclusive", "retired"] as const;
+export type HypothesisStatus = (typeof HYPOTHESIS_STATUSES)[number];
+export type Verdict = "supported" | "refuted" | "inconclusive";
+
+export interface GroupRates {
+  engagementRate: number | null;
+  clickRate: number | null;
+  signupRate: number | null;
+}
+
+/** Counted in code from the posts written for a hypothesis (core/growth/hypotheses.ts). */
+export interface HypothesisResult extends GroupRates {
+  posts: number;
+  measuredPosts: number;
+  impressions: number | null;
+  engagements: number | null;
+  visits: number;
+  signups: number | null;
+  baseline: GroupRates & { posts: number };
+  /** Relative difference from the baseline, e.g. 0.4 = 40% better. */
+  lift: number | null;
+  verdict: Verdict;
+  confidence: Confidence;
+  /** Why the verdict is what it is — including "not enough numbers yet". */
+  reason: string;
+  evaluatedAt: Date;
+}
+
+/**
+ * A claim about what will work, small enough to be tested by a handful of
+ * posts. The posts written for it carry its id; comparing them with the posts
+ * written for the other hypotheses is the experiment.
+ */
+export interface Hypothesis {
+  id: string;
+  productId: string;
+  strategyVersion: number;
+  statement: string;
+  dimension: HypothesisDimension;
+  /** The pain / message / audience being tested, in a few words. */
+  subject: string;
+  /** Why we think it might be true. */
+  basis: string;
+  /** What we would see if it is. */
+  expected: string;
+  /** Ids of the MarketInsights it was drawn from. */
+  basisInsights: string[];
+  targetPosts: number;
+  status: HypothesisStatus;
+  result: HypothesisResult | null;
+  /** A learning has been written for the verdict. */
+  learned: boolean;
+  createdAt: Date;
+  concludedAt: Date | null;
+}
+
+export const LEARNING_KINDS = ["pain", "audience", "message", "format", "channel", "timing", "other"] as const;
+export type LearningKind = (typeof LEARNING_KINDS)[number];
+
+/**
+ * Marketing knowledge specific to this product: what results showed. The
+ * asset that grows with use — every new strategy is written against the active
+ * ones, and a newer finding on the same subject supersedes the older.
+ */
+export interface Learning {
+  id: string;
+  productId: string;
+  hypothesisId: string | null;
+  kind: LearningKind;
+  direction: "works" | "fails" | "unclear";
+  statement: string;
+  /** Why the result came out this way. */
+  explanation: string;
+  confidence: Confidence;
+  evidence: {
+    posts: number;
+    impressions: number | null;
+    engagements: number | null;
+    visits: number;
+    signups: number | null;
+    lift: number | null;
+  };
+  source: "experiment" | "owner";
+  status: "active" | "superseded";
+  createdAt: Date;
+}
+
+// --- Execution & measurement ------------------------------------------------
 
 export const OPPORTUNITY_SOURCES = ["x", "hackernews", "web", "manual"] as const;
 export type OpportunitySource = (typeof OPPORTUNITY_SOURCES)[number];
@@ -552,7 +769,7 @@ export interface Opportunity {
   relevance: number;
   reasons: string[];
   intent: "seeking_solution" | "complaint" | "question" | "discussion";
-  icpName: string | null;
+  segmentName: string | null;
   recommendedAction: "reply" | "content" | "watch";
   status: OpportunityStatus;
   createdAt: Date;
@@ -570,10 +787,11 @@ export interface PostMetrics {
   source: "x_api" | "manual";
 }
 
-export const POST_STATUSES = ["draft", "approved", "published", "rejected", "failed"] as const;
+/** idea → draft → approved → published. An idea is a topic with a date and a hypothesis, before it is written. */
+export const POST_STATUSES = ["idea", "draft", "approved", "published", "rejected", "failed"] as const;
 export type PostStatus = (typeof POST_STATUSES)[number];
 
-/** A post or a reply, from draft to what it did once it was out. */
+/** A post or a reply, from idea to what it did once it was out. */
 export interface Post {
   id: string;
   productId: string;
@@ -581,6 +799,10 @@ export interface Post {
   kind: "post" | "reply";
   postType: PostType;
   pillar: string | null;
+  /** The hypothesis this post is written to test. Null for replies and one-off posts. */
+  hypothesisId: string | null;
+  /** The idea, in a line, before the post is written. */
+  topic: string | null;
   hook: string;
   body: string;
   cta: string;
@@ -630,33 +852,34 @@ export interface AgentAction {
   createdAt: Date;
 }
 
-/** Per post type, counted in code (core/growth/performance.ts). */
-export interface TypeStats {
-  postType: PostType;
+/**
+ * Impressions → engagement → profile visits → website visits → signups →
+ * activation → paid. `null` is "not measured" (no metrics, or no event named
+ * for that stage) — never a zero standing in for one.
+ */
+export interface MeasurementFunnel {
   posts: number;
-  impressions: number;
-  engagements: number;
-  engagementRate: number | null;
-  visits: number;
-  clickRate: number | null;
-  signups: number;
-  score: number;
+  impressions: number | null;
+  engagements: number | null;
+  profileVisits: number | null;
+  websiteVisitors: number;
+  signups: number | null;
+  activations: number | null;
+  paid: number | null;
 }
 
-/** The analysis of what the published posts did, and what to do next. */
+/** A period's review: what the numbers were, why, and what to do. */
 export interface AnalyticsReport {
   id: string;
   productId: string;
   runId: string | null;
   windowStart: Date;
   windowEnd: Date;
-  stats: TypeStats[];
-  worked: string[];
-  failed: string[];
-  recommendation: string;
+  funnel: MeasurementFunnel;
+  headline: string;
+  why: string[];
   nextActions: string[];
-  mixBefore: Record<string, number>;
-  mixAfter: Record<string, number>;
+  learningIds: string[];
   createdAt: Date;
 }
 
@@ -701,7 +924,10 @@ export interface Collections {
   productKnowledge: ProductKnowledge;
   marketInsights: MarketInsight;
   competitors: Competitor;
-  icps: Icp;
+  segments: Segment;
+  positionings: Positioning;
+  hypotheses: Hypothesis;
+  learnings: Learning;
   strategies: MarketingStrategy;
   opportunities: Opportunity;
   posts: Post;
@@ -731,7 +957,10 @@ export const COLLECTION_NAMES = [
   "productKnowledge",
   "marketInsights",
   "competitors",
-  "icps",
+  "segments",
+  "positionings",
+  "hypotheses",
+  "learnings",
   "strategies",
   "opportunities",
   "posts",

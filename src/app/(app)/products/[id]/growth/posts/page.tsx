@@ -14,7 +14,9 @@ import { by } from "@/db/sort";
 import { env } from "@/env";
 import { requireUser } from "@/server/auth/current-user";
 
+import { POST_TYPE_LABELS } from "../labels";
 import { PostCard } from "../post-card";
+import { RejectIdea } from "../reject-idea";
 import { RunButton } from "../run-button";
 
 export const dynamic = "force-dynamic";
@@ -45,6 +47,8 @@ export default async function GrowthPostsPage({ params }: { params: Promise<{ id
   const viaX = (post: (typeof posts)[number]) => post.kind === "post" || (post.opportunityId !== null && xSource.has(post.opportunityId));
   const xConfigured = xCredentialsFrom(env) !== null;
 
+  const hypotheses = new Map((await db.hypotheses.find({ where: [["productId", "==", id]] })).map((h) => [h.id, h]));
+  const ideas = posts.filter((p) => p.status === "idea").sort(by((p) => p.plannedFor ?? "9999"));
   const waiting = posts
     .filter((p) => p.status === "draft" || p.status === "failed" || (p.status === "approved" && !p.publishedAt))
     .sort(by((p) => p.plannedFor ?? p.createdAt.toISOString()));
@@ -59,16 +63,21 @@ export default async function GrowthPostsPage({ params }: { params: Promise<{ id
       viaX={viaX(post)}
       dryRun={settings.GRAPE_ACTION_DRY_RUN}
       xConfigured={xConfigured}
-      attribution={post.status === "published" ? (attribution.get(post.id) ?? { visits: 0, signups: 0 }) : null}
+      attribution={
+        post.status === "published"
+          ? { visits: attribution.get(post.id)?.visits ?? 0, signups: product.signupEventName ? (attribution.get(post.id)?.signups ?? 0) : null }
+          : null
+      }
+      hypothesis={post.hypothesisId ? (hypotheses.get(post.hypothesisId)?.subject ?? null) : null}
     />
   );
 
   return (
     <Page>
       <PageHeader
-        title="投稿と返信"
-        description="AIが作った案を確認して、承認するか見送ります。見送った理由は次の案に活かされます。"
-        actions={<RunButton productId={id} focus="content" label="いま案を作る" />}
+        title="投稿"
+        description="仮説を確かめるための投稿です。直してから承認できます。見送った理由と直した内容は、次の案に活かされます。"
+        actions={<RunButton productId={id} focus="content" label="ネタと下書きを補充する" />}
       />
 
       <Callout>
@@ -90,7 +99,29 @@ export default async function GrowthPostsPage({ params }: { params: Promise<{ id
         )}
       </Section>
 
-      <Section title={`公開済み（${published.length}）`} description="表示や反応はXから（APIが無ければ手入力で）、訪問と登録はサイトの計測コードから数えています。">
+      <Section id="upcoming" title={`これからのネタ（${ideas.length}）`} description="検証中の仮説ごとに出したネタです。予定日の2日前に下書きになります。要らないネタは取り下げてください。">
+        {ideas.length === 0 ? (
+          <p className="text-sm text-text-muted">予定しているネタはありません。</p>
+        ) : (
+          <ul className="flex flex-col divide-y divide-border rounded-md border border-border text-sm shadow-card">
+            {ideas.map((idea) => (
+              <li key={idea.id} className="flex flex-wrap items-center gap-3 px-3 py-2">
+                <span className="w-14 shrink-0 text-xs tabular-nums text-text-subtle">{idea.plannedFor?.slice(5) ?? "未定"}</span>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="text-xs text-text-muted">
+                    {POST_TYPE_LABELS[idea.postType]}
+                    {idea.hypothesisId && hypotheses.get(idea.hypothesisId) ? ` ・ 仮説「${hypotheses.get(idea.hypothesisId)!.subject}」` : ""}
+                  </span>
+                  <span>{idea.topic}</span>
+                </span>
+                <RejectIdea postId={idea.id} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+
+      <Section id="published" title={`公開済み（${published.length}）`} description="表示や反応はXから（APIが無ければ手入力で）、訪問と登録はサイトの計測コードから数えています。">
         {published.length === 0 ? (
           <p className="text-sm text-text-muted">まだありません。</p>
         ) : (

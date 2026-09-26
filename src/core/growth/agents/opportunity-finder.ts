@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 
-import type { Icp, OpportunitySource } from "@/db/schema";
+import type { OpportunitySource, Segment } from "@/db/schema";
 
 import type { ConversationCandidate, ConversationSource } from "../sources/types";
 import type { WebResearcher } from "../sources/web";
@@ -32,9 +32,9 @@ export const ScoredOpportunities = z.object({
     z.object({
       index: z.number().int().describe("候補の番号"),
       relevance: percent.describe("このプロダクトを必要としている可能性（0〜100）"),
-      reasons: z.array(z.string()).describe("そう判断した理由を2〜4件。ICPの一致・問題の一致・解決策を探しているか・このプロダクトで解けるか。日本語で短く。"),
+      reasons: z.array(z.string()).describe("そう判断した理由を2〜4件。セグメントの一致・問題の一致・解決策を探しているか・このプロダクトで解けるか。日本語で短く。"),
       intent: z.enum(["seeking_solution", "complaint", "question", "discussion"]),
-      icpName: z.string().describe("一致するICPの名前。無ければ空文字。"),
+      segmentName: z.string().describe("一致するセグメントの名前。無ければ空文字。"),
       recommendedAction: z
         .enum(["reply", "content", "watch"])
         .describe("reply=返信して役に立てる / content=返信より投稿のネタにする方がよい / watch=今は動かない"),
@@ -46,7 +46,7 @@ export interface ScoredOpportunity extends ConversationCandidate {
   relevance: number;
   reasons: string[];
   intent: "seeking_solution" | "complaint" | "question" | "discussion";
-  icpName: string | null;
+  segmentName: string | null;
   recommendedAction: "reply" | "content" | "watch";
 }
 
@@ -124,7 +124,7 @@ const SCORE_SUFFIX = `
 投稿者がこのプロダクトを必要としている可能性を判断する。
 
 判断の基準:
-- ICPと一致するか / 抱えている問題がプロダクトの解く問題と一致するか
+- 狙うセグメントと一致するか / 抱えている問題がプロダクトの解く問題と一致するか
 - 今まさに解決策を探しているか（質問・不満・「〜ないかな」）
 - このプロダクトで本当に解けるか（解けないなら低くする）
 - 宣伝・求人・プロダクトの告知そのものは低くする
@@ -159,7 +159,7 @@ export const CONVERSATION_DOMAINS = [
 export interface OpportunityFinderDeps extends AgentDeps {
   sources: ConversationSource[];
   web: WebResearcher | null;
-  icps: Pick<Icp, "name" | "problem" | "keywords" | "xPhrases">[];
+  segments: Pick<Segment, "name" | "problem" | "keywords" | "xPhrases">[];
   seen: Set<string>;
   blockKeywords: string[];
   productId?: string;
@@ -180,14 +180,14 @@ export async function runOpportunityFinder(deps: OpportunityFinderDeps): Promise
     system: deps.system + PLAN_SUFFIX,
     user: [
       `言語: ${deps.language}`,
-      "# ICP",
-      deps.icps
-        .map((icp) => `- ${icp.name}: ${icp.problem}\n  キーワード: ${icp.keywords.join(" / ")}\n  Xでの言い方: ${icp.xPhrases.join(" / ")}`)
+      "# 狙うセグメント",
+      deps.segments
+        .map((segment) => `- ${segment.name}: ${segment.problem}\n  キーワード: ${segment.keywords.join(" / ")}\n  Xでの言い方: ${segment.xPhrases.join(" / ")}`)
         .join("\n") || "(なし)",
     ].join("\n"),
   });
 
-  const phrases = cleanList([...plan.phrases, ...deps.icps.flatMap((icp) => icp.xPhrases)], 12);
+  const phrases = cleanList([...plan.phrases, ...deps.segments.flatMap((segment) => segment.xPhrases)], 12);
   const english = cleanList(plan.englishQueries, 5);
   const searched: OpportunityResult["searched"] = [];
   const all: ConversationCandidate[] = [];
@@ -213,7 +213,7 @@ export async function runOpportunityFinder(deps: OpportunityFinderDeps): Promise
     try {
       const result = await deps.web.research({
         instructions: WEB_INSTRUCTIONS,
-        question: `${deps.system}\n\nThe people we look for: ${deps.icps.map((icp) => `${icp.name} — ${icp.problem}`).join("; ")}\nHow they put it: ${phrases.join(" / ")}`,
+        question: `${deps.system}\n\nThe people we look for: ${deps.segments.map((segment) => `${segment.name} — ${segment.problem}`).join("; ")}\nHow they put it: ${phrases.join(" / ")}`,
         maxSearches: 4,
         allowedDomains: CONVERSATION_DOMAINS,
         effort: "low",
@@ -236,7 +236,7 @@ export async function runOpportunityFinder(deps: OpportunityFinderDeps): Promise
     }
   }
 
-  const keywords = deps.icps.flatMap((icp) => icp.keywords);
+  const keywords = deps.segments.flatMap((segment) => segment.keywords);
   const shortlist = prefilter(all, {
     seen: deps.seen,
     blockKeywords: deps.blockKeywords,
@@ -254,7 +254,7 @@ export async function runOpportunityFinder(deps: OpportunityFinderDeps): Promise
  */
 export async function scoreCandidates(
   shortlist: ConversationCandidate[],
-  deps: AgentDeps & { icps: Pick<Icp, "name" | "problem">[] },
+  deps: AgentDeps & { segments: Pick<Segment, "name" | "problem">[] },
 ): Promise<ScoredOpportunity[]> {
   if (shortlist.length === 0) return [];
 
@@ -264,8 +264,8 @@ export async function scoreCandidates(
     schema: ScoredOpportunities,
     system: deps.system + SCORE_SUFFIX,
     user: [
-      "# ICP",
-      deps.icps.map((icp) => `- ${icp.name}: ${icp.problem}`).join("\n") || "(なし)",
+      "# 狙うセグメント",
+      deps.segments.map((segment) => `- ${segment.name}: ${segment.problem}`).join("\n") || "(なし)",
       "",
       "# 候補の投稿",
       shortlist
@@ -285,7 +285,7 @@ export async function scoreCandidates(
       relevance: result.relevance,
       reasons,
       intent: result.intent,
-      icpName: result.icpName.trim() || null,
+      segmentName: result.segmentName.trim() || null,
       recommendedAction: result.recommendedAction,
     });
   }

@@ -15,7 +15,7 @@ export interface NavProduct {
   url: string;
   /** Shown as a count beside 診断とタスク — the only "waiting on you" signal in the nav. */
   openTasks: number;
-  /** Growth posts and replies drafted and waiting for a decision — beside 投稿と返信. */
+  /** Growth posts and replies drafted and waiting for a decision — beside 投稿. */
   pendingApprovals: number;
 }
 

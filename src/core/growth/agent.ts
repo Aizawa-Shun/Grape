@@ -30,8 +30,30 @@ export const RESEARCH_STALE_DAYS = 7;
 /** A daily run is due once the last one is this old — a little under a day, so the tick's jitter never skips one. */
 const DAILY_EVERY_MS = 20 * 60 * 60 * 1000;
 
-export const FULL_RUN: GrowthStepKind[] = ["product", "market", "competitors", "icp", "strategy", "opportunities", "content"];
+/** Understand → decide → prepare the first week's posts, then look for people already talking. */
+export const FULL_RUN: GrowthStepKind[] = [
+  "product",
+  "market",
+  "competitors",
+  "audience",
+  "positioning",
+  "strategy",
+  "experiments",
+  "ideas",
+  "content",
+  "opportunities",
+];
 
+const RESEARCH: GrowthStepKind[] = ["market", "competitors", "audience", "positioning", "strategy"];
+const LEARN: GrowthStepKind[] = ["metrics", "measure", "learn", "revise"];
+const PLAN: GrowthStepKind[] = ["experiments", "ideas", "content"];
+
+/**
+ * The daily turn of the loop, in the order the spec draws it: first look at
+ * what went out and learn from it (so today's plan uses today's learnings),
+ * then — once a week — redo the research, then keep the experiments stocked
+ * and the next days drafted, then look for conversations.
+ */
 export async function planSteps(
   productId: string,
   kind: GrowthRunKind,
@@ -47,16 +69,16 @@ export async function planSteps(
   ]);
 
   const steps: GrowthStepKind[] = [];
-  if (published > 0) steps.push("metrics", "performance");
-  // The research is redone from the planner's last strategy, not the learning
-  // step's re-weighting of it — that one is a week's results, not new research.
+  if (published > 0) steps.push(...LEARN);
+  // Research is redone from the planner's last strategy, not from a revision —
+  // a revision is a week's results, not new research.
   const planned = firstBy(strategies.filter((s) => s.origin === "planner"), by((s) => s.createdAt, "desc"));
   const plannerAge = planned ? now.getTime() - planned.createdAt.getTime() : Infinity;
   // A fresh competitor step re-reads every homepage anyway; otherwise the
   // watch step compares them with what they said last time.
-  if (plannerAge > RESEARCH_STALE_DAYS * DAY_MS) steps.push("market", "competitors", "icp", "strategy");
+  if (plannerAge > RESEARCH_STALE_DAYS * DAY_MS) steps.push(...RESEARCH);
   else steps.push("watch");
-  steps.push("opportunities", "content");
+  steps.push(...PLAN, "opportunities");
   if (policy.approvalMode === "autonomous") steps.push("autopilot");
   return steps;
 }
@@ -64,10 +86,10 @@ export async function planSteps(
 /** What a person can ask a manual run to do, besides the whole analysis. */
 export const RUN_FOCUSES = {
   full: FULL_RUN,
-  research: ["market", "competitors", "icp", "strategy"],
+  research: [...RESEARCH, ...PLAN],
   opportunities: ["opportunities"],
-  content: ["content"],
-  learn: ["metrics", "performance"],
+  content: ["experiments", "ideas", "content"],
+  learn: LEARN,
 } as const satisfies Record<string, readonly GrowthStepKind[]>;
 export type RunFocus = keyof typeof RUN_FOCUSES;
 

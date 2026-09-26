@@ -2,47 +2,74 @@ import { contextVersions } from "@/core/context/edit";
 import { AppError } from "@/core/errors";
 import { getProvider, llmAvailable, type LLMProvider } from "@/core/llm";
 import { db, type Database } from "@/db/client";
-import type { GrowthRun, GrowthStepKind, PlanSlot, Post, Product, ProductKnowledge } from "@/db/schema";
-import { by } from "@/db/sort";
+import type { Fact, GrowthRun, GrowthStepKind, Hypothesis, KnowledgeTopic, Post, Product, ProductKnowledge } from "@/db/schema";
+import { by, firstBy } from "@/db/sort";
 
+import { runAudienceAnalyzer } from "./agents/audience-analyzer";
 import { runCompetitorAnalyzer } from "./agents/competitor-analyzer";
-import { runContentGenerator } from "./agents/content-generator";
-import { runIcpAnalyzer } from "./agents/icp-analyzer";
+import { runContentGenerator, type ContentSlot } from "./agents/content-generator";
+import { HYPOTHESES_PER_ROUND, POSTS_PER_HYPOTHESIS, runExperimentDesigner, runIdeaGenerator } from "./agents/experiment-designer";
+import { runLearner } from "./agents/learner";
 import { runMarketResearcher } from "./agents/market-researcher";
 import { runOpportunityFinder } from "./agents/opportunity-finder";
-import { runPerformanceAnalyzer } from "./agents/performance-analyzer";
-import { knowledgeWithoutModel, runProductAnalyzer } from "./agents/product-analyzer";
+import { runPositioningAnalyzer } from "./agents/positioning-analyzer";
+import { knowledgeWithoutModel, runProductAnalyzer, type ProductKnowledgeDraft } from "./agents/product-analyzer";
 import { runReplyGenerator } from "./agents/reply-generator";
+import { runReviewer } from "./agents/reviewer";
 import type { AgentDeps } from "./agents/shared";
-import { runStrategyPlanner } from "./agents/strategy-planner";
-import { attributionFor } from "./attribution";
+import { runStrategyPlanner, runStrategyRevision } from "./agents/strategy-planner";
+import { attributionFor, eventConfigOf, EMPTY_ATTRIBUTION } from "./attribution";
+import { LIST_TOPICS, mergeQuestions, type SourcePage } from "./facts";
+import { evaluateHypothesis, type PostOutcome } from "./hypotheses";
 import { renderKnowledgePrefix, requireKnowledge } from "./knowledge";
+import {
+  activeGoal,
+  activeLearnings,
+  activeStrategy,
+  latestCompetitors,
+  latestInsights,
+  latestPositioning,
+  latestReport,
+  latestSegments,
+  testingHypotheses,
+} from "./latest";
+import { buildFunnel } from "./measurement";
 import { buildAgentMemory, renderMemory } from "./memory";
-import { activeGoal, activeStrategy, latestCompetitors, latestIcps, latestInsights, latestReport } from "./latest";
-import { mixOf, reweightPillars, typeStats, MIN_POSTS_TO_LEARN, type PostPerformance } from "./performance";
-import { planWeek } from "./mix";
 import { getPolicy, tokyoDay } from "./policy";
 import { approvePost } from "./publish";
 import { StepSkipped } from "./runs";
+import { DEFAULT_POSTS_PER_DAY, dayAfter, interleave, planDates } from "./schedule";
 import { conversationSources, createHackerNewsSource, fetchXMetrics, getWebResearcher, xReadAuth } from "./sources";
 import { fetchPublicPage, type PublicPage } from "./sources/page";
+import { createSuggestSource, type SuggestSource } from "./sources/suggest";
 import type { ConversationSource } from "./sources/types";
 import type { WebResearcher } from "./sources/web";
 import { trackingUrl } from "./tracking";
 import { watchCompetitors } from "./watch";
 
 /**
- * What each step of a growth run does against the database. The agents
- * (agents/*) are pure functions of their inputs; this is where their inputs
- * are loaded and their outputs saved, tagged with the run that produced them.
- * Each step returns one sentence for the progress screen and the Activity Log.
+ * What each step of the Marketing Brain's loop does against the database.
+ *
+ *   understand   product → market → competitors → audience → positioning
+ *   decide       strategy → experiments (hypotheses) → ideas
+ *   execute      content (drafts) → [review & publish, by a person] → opportunities
+ *   learn        metrics → measure → learn → revise
+ *
+ * The agents (agents/*) are pure functions of their inputs; this is where
+ * their inputs are loaded and their outputs saved, tagged with the run that
+ * produced them. Each step returns one sentence for the progress screen and
+ * the Activity Log.
  */
 
 const DAY_MS = 86_400_000;
-/** How many days of the plan are drafted ahead. More would go stale before they are posted. */
-const DRAFT_DAYS_AHEAD = 3;
+/** Ideas due within this many days are written up as drafts. Further out, they stay ideas — a draft goes stale. */
+const DRAFT_DAYS_AHEAD = 2;
+/** How far ahead ideas are planned: enough to see the week coming, little enough that a revision can still change it. */
+const PLAN_DAYS_AHEAD = 7;
 /** Opportunities below this are noise, not "low relevance" — not kept at all. */
 const KEEP_RELEVANCE = 30;
+/** How often the week's review is written. */
+const REVIEW_EVERY_DAYS = 6;
 
 /**
  * The outside world a step reaches: the model, the web, the conversation
@@ -55,6 +82,7 @@ export interface StepServices {
   hackerNews?: ConversationSource;
   sources?: ConversationSource[];
   fetchPage?: (url: string) => Promise<PublicPage | null>;
+  suggest?: SuggestSource | null;
 }
 
 interface StepContext {
@@ -78,200 +106,340 @@ async function agentDeps(product: Product, knowledge: ProductKnowledge, conn: Da
   return { provider: await providerOf(services), system: renderKnowledgePrefix(product, knowledge, language), language };
 }
 
-// --- product ----------------------------------------------------------------
+async function depsFor(ctx: StepContext): Promise<{ knowledge: ProductKnowledge; deps: AgentDeps }> {
+  const knowledge = await requireKnowledge(ctx.product.id, ctx.conn);
+  return { knowledge, deps: await agentDeps(ctx.product, knowledge, ctx.conn, ctx.services) };
+}
 
-async function productStep({ run, product, conn, now, services }: StepContext): Promise<string> {
+// --- understand -------------------------------------------------------------
+
+/**
+ * A re-analysis never throws away what the owner said. Facts they wrote or
+ * confirmed stay; the model's new reading fills in around them, and a model
+ * fact that repeats an owner fact is dropped. The owner's answers also close
+ * the questions they answered.
+ */
+export function mergeWithOwner(draft: ProductKnowledgeDraft, existing: ProductKnowledge | null): ProductKnowledgeDraft {
+  if (!existing) return draft;
+  const owned = (facts: Fact[]) => facts.filter((fact) => fact.basis === "owner");
+  const key = (fact: Fact) => fact.text.replace(/\s/g, "");
+  const merged: ProductKnowledgeDraft = { ...draft };
+  merged.what = existing.what?.basis === "owner" ? existing.what : draft.what;
+  for (const topic of LIST_TOPICS) {
+    const mine = owned(existing[topic]);
+    const mineKeys = new Set(mine.map(key));
+    merged[topic] = [...mine, ...draft[topic].filter((fact) => !mineKeys.has(key(fact)))];
+  }
+  const answered = new Set<KnowledgeTopic>(
+    [...(existing.what?.basis === "owner" ? ["what" as const] : []), ...LIST_TOPICS.filter((t) => owned(existing[t]).length > 0)],
+  );
+  merged.questions = mergeQuestions(
+    draft.questions.filter((q) => !q.id.startsWith("auto-") && !answered.has(q.topic)),
+    { ...merged, id: "", productId: "", brandVoice: null, contextVersion: 0, updatedAt: new Date() },
+  );
+  return merged;
+}
+
+async function productStep({ product, conn, now, services }: StepContext): Promise<string> {
   const versions = await contextVersions(product.id, conn);
   const context = versions[0];
   if (!context) throw new AppError("CONFLICT", `Product ${product.id} has no context`, { hint: "サイトの読み取りが終わっていません。" });
   const analysis = versions.find((version) => version.analysis)?.analysis ?? null;
 
-  const existing = await conn.productKnowledge.get(product.id);
-  // A person's correction outranks a re-analysis. They can still ask for one
-  // explicitly (api/growth/[productId]/knowledge DELETE), which clears the mark.
-  if (existing?.editedByHuman && run.kind !== "initial") {
-    throw new StepSkipped("あなたが確認した内容をそのまま使います");
-  }
+  const crawled = await conn.crawlPages.find({ where: [["productId", "==", product.id]] });
+  const pages: SourcePage[] = crawled
+    .filter((page) => page.status === 200 && page.text)
+    .map((page) => ({ url: page.url, title: page.title, text: page.text ?? "", meta: page.meta ?? undefined }));
 
-  const draft = services.provider || llmAvailable()
-    ? await runProductAnalyzer({ product, context, analysis }, await providerOf(services))
-    : knowledgeWithoutModel(context, analysis);
+  const existing = await conn.productKnowledge.get(product.id);
+  const read =
+    (services.provider || llmAvailable()) && pages.length > 0
+      ? await runProductAnalyzer({ product, context, pages }, await providerOf(services))
+      : knowledgeWithoutModel(context, analysis);
+  const draft = mergeWithOwner(read, existing);
 
   await conn.productKnowledge.set(product.id, {
     productId: product.id,
     ...draft,
     brandVoice: existing?.brandVoice ?? null,
     contextVersion: context.version,
-    editedByHuman: false,
     updatedAt: now,
   });
-  return `${draft.marketingAngles.length}個のマーケティングの切り口と${draft.useCases.length}件の利用シーンを整理しました`;
+  const facts = [...(draft.what ? [draft.what] : []), ...LIST_TOPICS.flatMap((topic) => draft[topic])];
+  const known = facts.filter((fact) => fact.status === "known").length;
+  return `事実${known}件・仮説${facts.length - known}件を整理し、まだ分からないことを${draft.questions.length}件見つけました`;
 }
 
-// --- research ---------------------------------------------------------------
-
-async function marketStep({ run, product, conn, services }: StepContext): Promise<string> {
-  const knowledge = await requireKnowledge(product.id, conn);
-  const deps = await agentDeps(product, knowledge, conn, services);
+async function marketStep(ctx: StepContext): Promise<string> {
+  const { deps } = await depsFor(ctx);
+  const suggest = ctx.services.suggest !== undefined ? ctx.services.suggest : createSuggestSource();
   const result = await runMarketResearcher({
     ...deps,
-    web: await webOf(services),
-    hackerNews: services.hackerNews ?? createHackerNewsSource(),
-    productId: product.id,
+    web: await webOf(ctx.services),
+    hackerNews: ctx.services.hackerNews ?? createHackerNewsSource(),
+    suggest: suggest ?? undefined,
+    productId: ctx.product.id,
   });
   for (const finding of result.findings) {
-    await conn.marketInsights.insert({ productId: product.id, runId: run.id, ...finding });
+    await ctx.conn.marketInsights.insert({ productId: ctx.product.id, runId: ctx.run.id, ...finding });
   }
+  const phrases = result.findings.reduce((sum, f) => sum + f.userPhrases.length, 0);
   const grounded = result.findings.filter((f) => f.grounded).length;
-  return `${result.sourcesRead}件のソースを読み、${result.findings.length}件の発見を記録しました（うち出典つき${grounded}件${result.webUsed ? "" : "・Web検索なし"}）`;
+  return `${result.sourcesRead}件のソースを読み、${result.findings.length}件の発見（出典つき${grounded}件）と、顧客の言い回し${phrases}件を集めました${result.webUsed ? "" : "（Web検索なし）"}`;
 }
 
-async function competitorsStep({ run, product, conn, services }: StepContext): Promise<string> {
-  const knowledge = await requireKnowledge(product.id, conn);
-  const deps = await agentDeps(product, knowledge, conn, services);
-  const analysis = (await contextVersions(product.id, conn)).find((v) => v.analysis)?.analysis ?? null;
+async function competitorsStep(ctx: StepContext): Promise<string> {
+  const { deps } = await depsFor(ctx);
+  const analysis = (await contextVersions(ctx.product.id, ctx.conn)).find((v) => v.analysis)?.analysis ?? null;
   const result = await runCompetitorAnalyzer({
     ...deps,
-    web: await webOf(services),
-    fetchPage: services.fetchPage ?? ((url) => fetchPublicPage(url)),
+    web: await webOf(ctx.services),
+    fetchPage: ctx.services.fetchPage ?? ((url) => fetchPublicPage(url)),
     similarServices: analysis?.market.similarServices.items ?? [],
-    productId: product.id,
+    productId: ctx.product.id,
   });
   for (const competitor of result.competitors) {
-    await conn.competitors.insert({ productId: product.id, runId: run.id, ...competitor, snapshotAt: competitor.snapshot ? new Date() : null });
+    await ctx.conn.competitors.insert({ productId: ctx.product.id, runId: ctx.run.id, ...competitor, snapshotAt: competitor.snapshot ? ctx.now : null });
   }
   for (const gap of result.gaps) {
-    await conn.marketInsights.insert({ productId: product.id, runId: run.id, kind: "gap", statement: gap.statement, userPhrases: [], sources: gap.sources, grounded: gap.grounded });
+    await ctx.conn.marketInsights.insert({ productId: ctx.product.id, runId: ctx.run.id, kind: "gap", statement: gap.statement, userPhrases: [], sources: gap.sources, grounded: gap.grounded });
   }
   const verified = result.competitors.filter((c) => c.verified).length;
-  return `${result.competitors.length}社を分析しました（公式サイトを確認${verified}社）。未訴求の領域を${result.gaps.length}件見つけました`;
+  return `${result.competitors.length}社を分析しました（公式サイトを確認${verified}社）。まだ誰も訴求していない領域を${result.gaps.length}件見つけました`;
 }
 
-async function icpStep({ run, product, conn, services }: StepContext): Promise<string> {
-  const knowledge = await requireKnowledge(product.id, conn);
-  const deps = await agentDeps(product, knowledge, conn, services);
-  const [insights, competitors] = await Promise.all([latestInsights(product.id, conn), latestCompetitors(product.id, conn)]);
-  const icps = await runIcpAnalyzer({ insights, competitors }, deps);
-  if (icps.length === 0) throw new AppError("LLM_BAD_OUTPUT", "No ICP returned");
-  for (const [rank, icp] of icps.entries()) {
-    await conn.icps.insert({ productId: product.id, runId: run.id, rank: rank + 1, ...icp });
-  }
-  return `ICPを${icps.length}件特定しました: ${icps.map((icp) => icp.name).join(" / ")}`;
-}
-
-async function strategyStep({ run, product, conn, services }: StepContext): Promise<string> {
-  const knowledge = await requireKnowledge(product.id, conn);
-  const deps = await agentDeps(product, knowledge, conn, services);
-  const [icps, insights, competitors, previous, goal, report] = await Promise.all([
-    latestIcps(product.id, conn),
-    latestInsights(product.id, conn),
-    latestCompetitors(product.id, conn),
-    activeStrategy(product.id, conn),
-    activeGoal(product.id, conn),
-    latestReport(product.id, conn),
+async function audienceStep(ctx: StepContext): Promise<string> {
+  const { deps } = await depsFor(ctx);
+  const [insights, competitors, learnings] = await Promise.all([
+    latestInsights(ctx.product.id, ctx.conn),
+    latestCompetitors(ctx.product.id, ctx.conn),
+    activeLearnings(ctx.product.id, ctx.conn),
   ]);
-  const draft = await runStrategyPlanner(
-    { goal, icps, insights, competitors, learning: report ? report.recommendation : null },
+  const segments = await runAudienceAnalyzer({ insights, competitors, learnings }, deps);
+  if (segments.length === 0) throw new AppError("LLM_BAD_OUTPUT", "No segment returned");
+  for (const [rank, segment] of segments.entries()) {
+    await ctx.conn.segments.insert({ productId: ctx.product.id, runId: ctx.run.id, rank: rank + 1, ...segment });
+  }
+  const label = { high: "根拠が多い", medium: "根拠あり", low: "根拠が薄い" } as const;
+  return `狙う候補を${segments.length}つに絞りました。最優先は「${segments[0].name}」（${label[segments[0].confidence]}）`;
+}
+
+async function positioningStep(ctx: StepContext): Promise<string> {
+  const { knowledge, deps } = await depsFor(ctx);
+  const [segment] = await latestSegments(ctx.product.id, ctx.conn);
+  if (!segment) throw new StepSkipped("狙うセグメントがまだ無いので、ポジショニングを決められませんでした");
+  const [competitors, insights] = await Promise.all([latestCompetitors(ctx.product.id, ctx.conn), latestInsights(ctx.product.id, ctx.conn)]);
+  const statement = await runPositioningAnalyzer(
+    {
+      segment,
+      differentiators: knowledge.differentiators,
+      proof: knowledge.proof,
+      competitors,
+      gaps: insights.filter((i) => i.kind === "gap"),
+    },
     deps,
   );
-  await conn.strategies.insert({ productId: product.id, runId: run.id, version: (previous?.version ?? 0) + 1, origin: "planner", ...draft });
-  return `戦略を立てました。柱: ${draft.pillars.map((p) => `${p.name} ${p.share}%`).join(" / ")}`;
+  await ctx.conn.positionings.insert({ productId: ctx.product.id, runId: ctx.run.id, ...statement });
+  const assumed = statement.because.filter((b) => b.status === "assumption").length;
+  return `「${statement.oneLiner}」${assumed ? `（選ばれる理由のうち${assumed}件は仮説）` : ""}`;
 }
 
-async function watchStep({ run, product, conn, now, services }: StepContext): Promise<string> {
-  const competitors = (await latestCompetitors(product.id, conn)).filter((c) => c.url && c.snapshot);
-  if (competitors.length === 0) throw new StepSkipped("見張れる競合（公式サイトを読めた競合）がまだありません");
-  const result = await watchCompetitors(competitors, services.fetchPage ?? ((url) => fetchPublicPage(url)), run.id, conn, now);
-  const unreachable = result.unreachable ? `（${result.unreachable}社は読めず）` : "";
-  if (result.moves.length === 0) return `${result.checked}社のサイトを確認しました。変化はありません${unreachable}`;
-  return `${result.checked}社を確認し、${result.moves.map((m) => m.competitor.name).join("・")}に変化がありました${unreachable}`;
+// --- decide -----------------------------------------------------------------
+
+/** The site funnel's latest diagnosis, when there is one: what the conversion half of the strategy must answer. */
+async function siteFinding(productId: string, conn: Database): Promise<string | null> {
+  const diagnosis = firstBy(await conn.diagnoses.find({ where: [["productId", "==", productId]] }), by((d) => d.createdAt, "desc"));
+  return diagnosis ? `いちばん人が離れている段階: ${diagnosis.bottleneckStage}。${diagnosis.summary}` : null;
 }
 
-// --- opportunities ----------------------------------------------------------
-
-async function opportunitiesStep({ run, product, conn, services }: StepContext): Promise<string> {
-  const knowledge = await requireKnowledge(product.id, conn);
-  const deps = await agentDeps(product, knowledge, conn, services);
-  const [icps, policy, existing] = await Promise.all([
-    latestIcps(product.id, conn),
-    getPolicy(product.id, conn),
-    conn.opportunities.find({ where: [["productId", "==", product.id]] }),
+async function strategyStep(ctx: StepContext): Promise<string> {
+  const { deps } = await depsFor(ctx);
+  const [segments, positioning, insights, competitors, previous, goal, learnings, finding] = await Promise.all([
+    latestSegments(ctx.product.id, ctx.conn),
+    latestPositioning(ctx.product.id, ctx.conn),
+    latestInsights(ctx.product.id, ctx.conn),
+    latestCompetitors(ctx.product.id, ctx.conn),
+    activeStrategy(ctx.product.id, ctx.conn),
+    activeGoal(ctx.product.id, ctx.conn),
+    activeLearnings(ctx.product.id, ctx.conn),
+    siteFinding(ctx.product.id, ctx.conn),
   ]);
-  if (icps.length === 0) throw new StepSkipped("ICPがまだ無いので探せませんでした");
+  const segment = segments[0];
+  if (!segment || !positioning) throw new StepSkipped("狙う相手とポジショニングがまだ無いので、戦略を立てられませんでした");
 
-  const result = await runOpportunityFinder({
-    ...deps,
-    sources: services.sources ?? conversationSources(),
-    web: await webOf(services),
-    icps,
-    seen: new Set(existing.map((o) => `${o.source}:${o.externalId}`)),
-    blockKeywords: policy.blockKeywords,
-    productId: product.id,
+  const draft = await runStrategyPlanner({ goal, segment, positioning, insights, competitors, learnings, siteFinding: finding }, deps);
+  const { segmentId, segmentName, oneLiner, forWhom, problem, product: productLine, alternatives, because } = positioning;
+  await ctx.conn.strategies.insert({
+    productId: ctx.product.id,
+    runId: ctx.run.id,
+    version: (previous?.version ?? 0) + 1,
+    segmentId: segment.id,
+    segmentName: segment.name,
+    positioning: { segmentId, segmentName, oneLiner, forWhom, problem, product: productLine, alternatives, because },
+    origin: "planner",
+    ...draft,
   });
-
-  let kept = 0;
-  for (const opportunity of result.opportunities) {
-    if (opportunity.relevance < KEEP_RELEVANCE) continue;
-    await conn.opportunities.insert({ productId: product.id, runId: run.id, ...opportunity });
-    kept += 1;
-  }
-  const high = result.opportunities.filter((o) => o.relevance >= policy.minRelevance).length;
-  const where = result.searched.map((s) => `${s.source}${s.error ? "(失敗)" : ` ${s.found}件`}`).join("・") || "なし";
-  return `${result.candidates}件の会話を調べ（${where}）、${kept}件を記録しました。関連度${policy.minRelevance}%以上は${high}件`;
+  const later = draft.channels.filter((c) => c.role === "later").map((c) => c.name).join("・");
+  return `中心メッセージ「${draft.coreMessage}」。まずXに集中します${later ? `（${later}は条件を満たしてから）` : ""}`;
 }
 
-// --- content ----------------------------------------------------------------
+async function experimentsStep(ctx: StepContext): Promise<string> {
+  const [strategy, testing] = await Promise.all([activeStrategy(ctx.product.id, ctx.conn), testingHypotheses(ctx.product.id, ctx.conn)]);
+  if (!strategy) throw new StepSkipped("戦略がまだ無いので、仮説を立てられませんでした");
+  const need = HYPOTHESES_PER_ROUND - testing.length;
+  if (need <= 0) throw new StepSkipped(`検証中の仮説が${testing.length}件あるので、その結果を待ちます`);
 
-async function contentStep({ run, product, conn, now, services }: StepContext): Promise<string> {
-  const policy = await getPolicy(product.id, conn);
-  // Manual mode: nothing is drafted unasked. A run the person started still drafts.
-  if (policy.approvalMode === "manual" && run.kind === "daily") {
-    throw new StepSkipped("承認モードが「手動」なので、案の自動作成はしません");
+  const { deps } = await depsFor(ctx);
+  const [segments, insights, learnings, all] = await Promise.all([
+    latestSegments(ctx.product.id, ctx.conn),
+    latestInsights(ctx.product.id, ctx.conn),
+    activeLearnings(ctx.product.id, ctx.conn),
+    ctx.conn.hypotheses.find({ where: [["productId", "==", ctx.product.id]] }),
+  ]);
+  const segment = segments.find((s) => s.id === strategy.segmentId) ?? segments[0];
+  if (!segment) throw new StepSkipped("狙うセグメントがまだありません");
+
+  const drafts = await runExperimentDesigner(
+    {
+      segment,
+      positioning: strategy.positioning,
+      coreMessage: strategy.coreMessage,
+      insights,
+      learnings,
+      testing: testing.map((h) => h.statement),
+      concluded: all.filter((h) => h.status !== "testing").map((h) => h.statement),
+      need,
+    },
+    deps,
+  );
+  for (const draft of drafts) {
+    await ctx.conn.hypotheses.insert({
+      productId: ctx.product.id,
+      strategyVersion: strategy.version,
+      targetPosts: POSTS_PER_HYPOTHESIS,
+      ...draft,
+    });
   }
-  const knowledge = await requireKnowledge(product.id, conn);
-  const strategy = await activeStrategy(product.id, conn);
-  if (!strategy) throw new StepSkipped("戦略がまだ無いので投稿案を作れませんでした");
-  const deps = await agentDeps(product, knowledge, conn, services);
-
-  const posts = await conn.posts.find({ where: [["productId", "==", product.id]] });
-  const taken = new Set(posts.filter((p) => p.kind === "post" && p.status !== "rejected" && p.plannedFor).map((p) => p.plannedFor));
-  const slots = strategy.weeklyPlan
-    .map((slot) => ({ ...slot, date: tokyoDay(new Date(now.getTime() + slot.day * DAY_MS)) }))
-    .filter((slot) => slot.day < DRAFT_DAYS_AHEAD && !taken.has(slot.date));
-
-  const drafts = await writePosts(product, knowledge, slots, deps, conn, { runId: run.id });
-  const replies = await draftReplies({ run, product, conn, now, services }, knowledge, deps, policy.maxRepliesPerDay);
-  return `投稿案${drafts.length}件、返信案${replies}件を作りました`;
+  if (drafts.length === 0) throw new StepSkipped("新しい仮説が出ませんでした（検証済みのものと同じだったため）。次の実行でもう一度立てます");
+  return `検証する仮説を${drafts.length}件立てました: ${drafts.map((d) => `「${d.subject}」`).join("・")}`;
 }
+
+/** Posts not yet out: the backlog a new idea would join. */
+function isPending(post: Post): boolean {
+  return post.status === "idea" || post.status === "draft" || (post.status === "approved" && !post.publishedAt);
+}
+
+async function ideasStep(ctx: StepContext): Promise<string> {
+  const [strategy, testing, posts, policy] = await Promise.all([
+    activeStrategy(ctx.product.id, ctx.conn),
+    testingHypotheses(ctx.product.id, ctx.conn),
+    ctx.conn.posts.find({ where: [["productId", "==", ctx.product.id]] }),
+    getPolicy(ctx.product.id, ctx.conn),
+  ]);
+  if (!strategy || testing.length === 0) throw new StepSkipped("検証中の仮説が無いので、ネタは出しません");
+
+  const own = posts.filter((p) => p.kind === "post");
+  const horizon = dayAfter(ctx.now, PLAN_DAYS_AHEAD);
+  const planned = own.filter((p) => isPending(p) && p.plannedFor && p.plannedFor <= horizon).length;
+  const perDay = Math.min(policy.maxPostsPerDay || DEFAULT_POSTS_PER_DAY, DEFAULT_POSTS_PER_DAY);
+  const room = Math.max(0, PLAN_DAYS_AHEAD * perDay - planned);
+  if (room === 0) throw new StepSkipped("1週間先まで予定が埋まっています");
+
+  // Each hypothesis gets what it still lacks toward its target, shared out in turns within the week's room.
+  const lacking = testing.map((h) => ({
+    hypothesis: h,
+    lacking: Math.max(0, h.targetPosts - own.filter((p) => p.hypothesisId === h.id && p.status !== "rejected").length),
+  }));
+  const shares = new Map<string, number>();
+  let left = room;
+  while (left > 0 && lacking.some(({ hypothesis, lacking: l }) => (shares.get(hypothesis.id) ?? 0) < l)) {
+    for (const { hypothesis, lacking: l } of lacking) {
+      if (left > 0 && (shares.get(hypothesis.id) ?? 0) < l) {
+        shares.set(hypothesis.id, (shares.get(hypothesis.id) ?? 0) + 1);
+        left -= 1;
+      }
+    }
+  }
+  if ([...shares.values()].every((n) => n === 0)) throw new StepSkipped("仮説ごとの投稿はそろっています。結果を待ちます");
+
+  const { deps } = await depsFor(ctx);
+  const [insights, memory] = await Promise.all([latestInsights(ctx.product.id, ctx.conn), buildAgentMemory(ctx.product.id, ctx.conn)]);
+  const ideas = await runIdeaGenerator(
+    {
+      hypotheses: testing.map((h) => ({ id: h.id, statement: h.statement, subject: h.subject, expected: h.expected, need: shares.get(h.id) ?? 0 })),
+      pillars: strategy.pillars,
+      coreMessage: strategy.coreMessage,
+      customerPhrases: insights.flatMap((i) => i.userPhrases),
+      existingTopics: own.map((p) => p.topic).filter((t): t is string => Boolean(t)),
+      memory: renderMemory(memory, "post"),
+    },
+    deps,
+  );
+
+  const taken: Record<string, number> = {};
+  for (const post of own) if (isPending(post) && post.plannedFor) taken[post.plannedFor] = (taken[post.plannedFor] ?? 0) + 1;
+  const ordered = interleave(testing.map((h) => ideas.filter((idea) => idea.hypothesisId === h.id)));
+  const dates = planDates(ordered.length, ctx.now, perDay, taken);
+  for (const [index, idea] of ordered.entries()) {
+    await ctx.conn.posts.insert({
+      productId: ctx.product.id,
+      runId: ctx.run.id,
+      kind: "post",
+      status: "idea",
+      postType: idea.postType,
+      pillar: idea.pillar,
+      hypothesisId: idea.hypothesisId,
+      topic: idea.topic,
+      hook: "",
+      body: "",
+      cta: "",
+      text: "",
+      rationale: "",
+      plannedFor: dates[index],
+    });
+  }
+  return `${ordered.length}件の投稿のネタを、${dates[0] ?? ""}から1日1本の予定で並べました`;
+}
+
+// --- execute ----------------------------------------------------------------
 
 /**
- * Writes posts for the given slots and saves them as drafts — shared by the
- * daily plan and by "投稿のネタにする" on a conversation. `plan: false` keeps
- * a one-off post out of the week's plan, so it does not take a day's slot.
+ * Writes ideas up as drafts. The idea row already exists — its id is what the
+ * post's tracking link carries — so writing it is an update: text, link,
+ * rationale, and the status moving from idea to draft.
  */
-export async function writePosts(
-  product: Product,
-  knowledge: ProductKnowledge,
-  slots: (PlanSlot & { date: string })[],
-  deps: AgentDeps,
-  conn: Database,
-  options: { runId?: string | null; plan?: boolean } = {},
-): Promise<Post[]> {
-  if (slots.length === 0) return [];
-  const [insights, icps, competitors, policy, memory] = await Promise.all([
+export async function writeDrafts(product: Product, ideas: Post[], deps: AgentDeps, conn: Database): Promise<Post[]> {
+  if (ideas.length === 0) return [];
+  const knowledge = await requireKnowledge(product.id, conn);
+  const [insights, segments, competitors, policy, memory, strategy, hypotheses] = await Promise.all([
     latestInsights(product.id, conn),
-    latestIcps(product.id, conn),
+    latestSegments(product.id, conn),
     latestCompetitors(product.id, conn),
     getPolicy(product.id, conn),
     buildAgentMemory(product.id, conn),
+    activeStrategy(product.id, conn),
+    conn.hypotheses.find({ where: [["productId", "==", product.id]] }),
   ]);
+  const hypothesisOf = new Map<string, Hypothesis>(hypotheses.map((h) => [h.id, h]));
+  const slots: ContentSlot[] = ideas.map((idea) => {
+    const hypothesis = idea.hypothesisId ? hypothesisOf.get(idea.hypothesisId) : undefined;
+    return {
+      id: idea.id,
+      date: idea.plannedFor ?? tokyoDay(new Date()),
+      pillar: idea.pillar ?? "",
+      postType: idea.postType,
+      topic: idea.topic ?? "",
+      hypothesis: hypothesis ? { statement: hypothesis.statement, subject: hypothesis.subject } : null,
+    };
+  });
 
   const drafts = await runContentGenerator(
     {
       slots,
+      coreMessage: strategy?.coreMessage ?? null,
       brandVoice: knowledge.brandVoice,
       userPhrases: insights.flatMap((i) => i.userPhrases),
-      icpNames: icps.map((i) => i.name),
+      icpNames: segments.map((s) => s.name),
       memory: renderMemory(memory, "post"),
       policy,
       competitorNames: competitors.map((c) => c.name),
@@ -279,51 +447,53 @@ export async function writePosts(
     deps,
   );
 
-  const saved: Post[] = [];
+  const written: Post[] = [];
   for (const draft of drafts) {
-    const id = crypto.randomUUID();
-    const link = draft.includeLink ? trackingUrl(product.url, id) : null;
-    saved.push(
-      await conn.posts.insert({
-        id,
-        productId: product.id,
-        runId: options.runId ?? null,
-        kind: "post",
-        postType: draft.postType,
-        pillar: draft.pillar,
-        hook: draft.hook,
-        body: draft.body,
-        cta: draft.cta,
-        text: link ? `${draft.text}\n${link}` : draft.text,
-        rationale: draft.rationale,
-        assetNeeded: draft.assetNeeded || null,
-        trackingUrl: link,
-        plannedFor: options.plan === false ? null : draft.plannedFor,
-      }),
-    );
+    const link = draft.includeLink ? trackingUrl(product.url, draft.slotId) : null;
+    const before = ideas.find((idea) => idea.id === draft.slotId)!;
+    const changes = {
+      status: "draft" as const,
+      hook: draft.hook,
+      body: draft.body,
+      cta: draft.cta,
+      text: link ? `${draft.text}\n${link}` : draft.text,
+      rationale: draft.rationale,
+      assetNeeded: draft.assetNeeded || null,
+      trackingUrl: link,
+    };
+    await conn.posts.update(draft.slotId, changes);
+    written.push({ ...before, ...changes });
   }
-  return saved;
+  return written;
+}
+
+async function contentStep(ctx: StepContext): Promise<string> {
+  const policy = await getPolicy(ctx.product.id, ctx.conn);
+  // Manual mode: nothing is drafted unasked. A run the person started still drafts.
+  if (policy.approvalMode === "manual" && ctx.run.kind === "daily") {
+    throw new StepSkipped("承認モードが「手動」なので、案の自動作成はしません");
+  }
+  const { knowledge, deps } = await depsFor(ctx);
+  const due = dayAfter(ctx.now, DRAFT_DAYS_AHEAD);
+  const ideas = (await ctx.conn.posts.find({ where: [["productId", "==", ctx.product.id], ["status", "==", "idea"]] }))
+    .filter((post) => post.plannedFor && post.plannedFor <= due)
+    .sort(by((post) => post.plannedFor ?? ""));
+
+  const drafts = await writeDrafts(ctx.product, ideas, deps, ctx.conn);
+  const replies = await draftReplies(ctx, knowledge, deps, policy.maxRepliesPerDay);
+  if (drafts.length === 0 && replies === 0) throw new StepSkipped("書く予定の投稿も、返信する会話も、今はありません");
+  return `投稿の下書き${drafts.length}件、返信案${replies}件を作りました`;
 }
 
 /** Reply drafts for the most relevant new conversations, up to the day's reply limit. */
-async function draftReplies(
-  { run, product, conn }: StepContext,
-  knowledge: ProductKnowledge,
-  deps: AgentDeps,
-  limit: number,
-): Promise<number> {
-  const policy = await getPolicy(product.id, conn);
-  const candidates = (await conn.opportunities.find({ where: [["productId", "==", product.id], ["status", "==", "new"]] }))
+async function draftReplies(ctx: StepContext, knowledge: ProductKnowledge, deps: AgentDeps, limit: number): Promise<number> {
+  const policy = await getPolicy(ctx.product.id, ctx.conn);
+  const candidates = (await ctx.conn.opportunities.find({ where: [["productId", "==", ctx.product.id], ["status", "==", "new"]] }))
     .filter((o) => o.recommendedAction === "reply" && o.relevance >= policy.minRelevance)
     .sort(by((o) => o.relevance, "desc"))
     .slice(0, limit);
-
-  let count = 0;
-  for (const opportunity of candidates) {
-    await createReplyDraft(product, opportunity.id, knowledge, deps, conn, run.id);
-    count += 1;
-  }
-  return count;
+  for (const opportunity of candidates) await createReplyDraft(ctx.product, opportunity.id, knowledge, deps, ctx.conn, ctx.run.id);
+  return candidates.length;
 }
 
 export async function createReplyDraft(
@@ -357,99 +527,204 @@ export async function createReplyDraft(
   return post;
 }
 
-// --- learning ---------------------------------------------------------------
+async function opportunitiesStep(ctx: StepContext): Promise<string> {
+  const { deps } = await depsFor(ctx);
+  const [segments, policy, existing] = await Promise.all([
+    latestSegments(ctx.product.id, ctx.conn),
+    getPolicy(ctx.product.id, ctx.conn),
+    ctx.conn.opportunities.find({ where: [["productId", "==", ctx.product.id]] }),
+  ]);
+  if (segments.length === 0) throw new StepSkipped("狙うセグメントがまだ無いので探せませんでした");
+
+  const result = await runOpportunityFinder({
+    ...deps,
+    sources: ctx.services.sources ?? conversationSources(),
+    web: await webOf(ctx.services),
+    segments,
+    seen: new Set(existing.map((o) => `${o.source}:${o.externalId}`)),
+    blockKeywords: policy.blockKeywords,
+    productId: ctx.product.id,
+  });
+
+  let kept = 0;
+  for (const opportunity of result.opportunities) {
+    if (opportunity.relevance < KEEP_RELEVANCE) continue;
+    await ctx.conn.opportunities.insert({ productId: ctx.product.id, runId: ctx.run.id, ...opportunity });
+    kept += 1;
+  }
+  const high = result.opportunities.filter((o) => o.relevance >= policy.minRelevance).length;
+  const where = result.searched.map((s) => `${s.source}${s.error ? "(失敗)" : ` ${s.found}件`}`).join("・") || "なし";
+  return `${result.candidates}件の会話を調べ（${where}）、${kept}件を記録しました。関連度${policy.minRelevance}%以上は${high}件`;
+}
+
+async function watchStep(ctx: StepContext): Promise<string> {
+  const competitors = (await latestCompetitors(ctx.product.id, ctx.conn)).filter((c) => c.url && c.snapshot);
+  if (competitors.length === 0) throw new StepSkipped("見張れる競合（公式サイトを読めた競合）がまだありません");
+  const result = await watchCompetitors(competitors, ctx.services.fetchPage ?? ((url) => fetchPublicPage(url)), ctx.run.id, ctx.conn, ctx.now);
+  const unreachable = result.unreachable ? `（${result.unreachable}社は読めず）` : "";
+  if (result.moves.length === 0) return `${result.checked}社のサイトを確認しました。変化はありません${unreachable}`;
+  return `${result.checked}社を確認し、${result.moves.map((m) => m.competitor.name).join("・")}に変化がありました${unreachable}`;
+}
+
+// --- learn ------------------------------------------------------------------
 
 const METRICS_WINDOW_DAYS = 30;
 
-async function recentPublished(productId: string, now: Date, conn: Database): Promise<Post[]> {
-  const cutoff = now.getTime() - METRICS_WINDOW_DAYS * DAY_MS;
+async function publishedPosts(productId: string, conn: Database): Promise<Post[]> {
   return (await conn.posts.find({ where: [["productId", "==", productId], ["status", "==", "published"]] })).filter(
-    (post) => post.publishedAt && post.publishedAt.getTime() >= cutoff,
+    (post) => post.kind === "post" && post.publishedAt,
   );
 }
 
 async function metricsStep({ product, conn, now }: StepContext): Promise<string> {
-  const posts = (await recentPublished(product.id, now, conn)).filter((p) => p.externalId);
-  if (posts.length === 0) throw new StepSkipped("数字を取る公開済みの投稿がまだありません");
+  const cutoff = now.getTime() - METRICS_WINDOW_DAYS * DAY_MS;
+  const posts = (await publishedPosts(product.id, conn)).filter((p) => p.externalId && p.publishedAt!.getTime() >= cutoff);
+  if (posts.length === 0) throw new StepSkipped("Xから数字を取れる公開済みの投稿がまだありません");
   const auth = xReadAuth();
-  if (!auth) throw new StepSkipped("Xの読み取り用の認証情報が無いので、サイト側の訪問と登録だけで分析します");
+  if (!auth) throw new StepSkipped("Xの読み取り用の認証情報が無いので、Xの数字は手入力かサイト側の数字だけで判断します");
   const metrics = await fetchXMetrics(posts.map((p) => p.externalId!), auth);
   for (const post of posts) {
     const found = metrics.get(post.externalId!);
-    if (found) await conn.posts.update(post.id, { metrics: found, metricsAt: now });
+    // A person's hand-entered numbers are not overwritten by an API that returned less.
+    if (found && post.metrics?.source !== "manual") await conn.posts.update(post.id, { metrics: found, metricsAt: now });
   }
   return `${metrics.size}件の投稿の表示・反応をXから取得しました`;
 }
 
-async function performanceStep({ run, product, conn, now, services }: StepContext): Promise<string> {
-  const posts = (await recentPublished(product.id, now, conn)).filter((p) => p.kind === "post");
-  if (posts.length === 0) throw new StepSkipped("分析する公開済みの投稿がまだありません");
-
+/**
+ * Measurement (spec §8): every hypothesis under test is re-evaluated against
+ * what its posts did, in code; and once a week, the week's funnel is reviewed.
+ */
+async function measureStep(ctx: StepContext): Promise<string> {
+  const { product, conn, now } = ctx;
+  const posts = await publishedPosts(product.id, conn);
+  if (posts.length === 0) throw new StepSkipped("公開した投稿がまだありません");
+  const config = eventConfigOf(product);
   const attribution = await attributionFor(product.id, posts, conn);
-  const performances: PostPerformance[] = posts.map((post) => ({
-    post,
-    attribution: attribution.get(post.id) ?? { visits: 0, visitors: 0, signups: 0 },
-  }));
-  const stats = typeStats(performances);
+  const outcomes: PostOutcome[] = posts.map((post) => ({ post, attribution: attribution.get(post.id) ?? EMPTY_ATTRIBUTION }));
 
-  const knowledge = await requireKnowledge(product.id, conn);
-  const narrative =
-    posts.length >= 2
-      ? await runPerformanceAnalyzer({ stats, performances }, await agentDeps(product, knowledge, conn, services))
-      : {
-          worked: [],
-          failed: [],
-          recommendation: "公開した投稿がまだ1本なので、傾向はまだ言えません。計画どおり投稿を続けてください。",
-          nextActions: [],
-        };
-
-  // GrowthStrategist: re-weight the mix in code from the same stats.
-  const strategy = await activeStrategy(product.id, conn);
-  const pillars = strategy ? reweightPillars(strategy, stats) : null;
-  const mixBefore = strategy ? mixOf(strategy.pillars) : {};
-  const changed = strategy && pillars && JSON.stringify(mixOf(pillars)) !== JSON.stringify(mixBefore);
-  if (strategy && pillars && changed) {
-    const topics: Record<string, string[]> = {};
-    for (const slot of strategy.weeklyPlan) (topics[slot.pillar] ??= []).push(slot.topic);
-    await conn.strategies.insert({
-      productId: product.id,
-      runId: run.id,
-      version: strategy.version + 1,
-      positioning: strategy.positioning,
-      messaging: strategy.messaging,
-      pillars,
-      channels: strategy.channels,
-      shortTerm: narrative.nextActions.length ? narrative.nextActions : strategy.shortTerm,
-      midTerm: strategy.midTerm,
-      weeklyPlan: planWeek(pillars, topics),
-      rationale: `結果に合わせて配分を調整した: ${narrative.recommendation}`,
-      origin: "learning",
+  const testing = await testingHypotheses(product.id, conn);
+  const concluded: string[] = [];
+  for (const hypothesis of testing) {
+    const result = evaluateHypothesis(hypothesis.id, outcomes, config.signup !== null, now);
+    const decided = result.verdict !== "inconclusive";
+    // Written for twice its target and still no difference: that is the answer.
+    const exhausted = !decided && result.posts >= hypothesis.targetPosts * 2;
+    await conn.hypotheses.update(hypothesis.id, {
+      result,
+      ...(decided || exhausted ? { status: decided ? result.verdict : "inconclusive", concludedAt: now } : {}),
     });
+    if (decided || exhausted) concluded.push(hypothesis.subject);
   }
 
-  const windowStart = new Date(Math.min(...posts.map((p) => p.publishedAt!.getTime())));
-  await conn.analyticsReports.insert({
-    productId: product.id,
-    runId: run.id,
-    windowStart,
-    windowEnd: now,
-    stats,
-    ...narrative,
-    mixBefore,
-    mixAfter: changed && pillars ? mixOf(pillars) : mixBefore,
-  });
+  let reviewed = false;
+  const last = await latestReport(product.id, conn);
+  const weekAgo = new Date(now.getTime() - 7 * DAY_MS);
+  const recent = posts.filter((p) => p.publishedAt! >= weekAgo);
+  if (recent.length > 0 && (!last || now.getTime() - last.createdAt.getTime() >= REVIEW_EVERY_DAYS * DAY_MS)) {
+    const funnel = buildFunnel(recent, attribution, config);
+    const { deps } = await depsFor(ctx);
+    const review = await runReviewer(
+      { funnel, hypotheses: await conn.hypotheses.find({ where: [["productId", "==", product.id]] }), siteFinding: await siteFinding(product.id, conn) },
+      deps,
+    );
+    await conn.analyticsReports.insert({
+      productId: product.id,
+      runId: ctx.run.id,
+      windowStart: weekAgo,
+      windowEnd: now,
+      funnel,
+      headline: review.headline,
+      why: review.why,
+      nextActions: review.nextActions,
+      learningIds: [],
+    });
+    reviewed = true;
+  }
 
-  const visits = performances.reduce((s, p) => s + p.attribution.visits, 0);
-  const signups = performances.reduce((s, p) => s + p.attribution.signups, 0);
-  const tail = changed
-    ? "。結果に合わせて投稿の配分を変えました"
-    : posts.length < MIN_POSTS_TO_LEARN
-      ? `。配分の調整は${MIN_POSTS_TO_LEARN}本以上たまってから行います`
-      : "";
-  return `${posts.length}本の投稿を分析しました（サイト訪問${visits}・登録${signups}）${tail}`;
+  const parts = [`検証中の仮説${testing.length}件を評価しました`];
+  if (concluded.length) parts.push(`結論が出たもの: ${concluded.map((c) => `「${c}」`).join("・")}`);
+  if (reviewed) parts.push("今週の振り返りを書きました");
+  return parts.join("。");
 }
 
-// --- autopilot --------------------------------------------------------------
+async function learnStep(ctx: StepContext): Promise<string> {
+  const { product, conn } = ctx;
+  const pending = (await conn.hypotheses.find({ where: [["productId", "==", product.id]] })).filter(
+    (h) => !h.learned && h.result && (h.status === "supported" || h.status === "refuted" || h.status === "inconclusive"),
+  );
+  if (pending.length === 0) throw new StepSkipped("新しく結論の出た仮説はありません");
+
+  const { deps } = await depsFor(ctx);
+  const posts = await publishedPosts(product.id, conn);
+  const attribution = await attributionFor(product.id, posts, conn);
+  const score = (post: Post) => {
+    const a = attribution.get(post.id) ?? EMPTY_ATTRIBUTION;
+    return a.signups * 100 + a.visitors * 10 + (post.metrics?.likes ?? 0);
+  };
+
+  const written: string[] = [];
+  for (const hypothesis of pending) {
+    const mine = posts.filter((p) => p.hypothesisId === hypothesis.id).sort((a, b) => score(b) - score(a));
+    const learning = await runLearner(
+      { hypothesis, result: hypothesis.result!, best: mine.slice(0, 2), worst: mine.slice(-2).reverse() },
+      deps,
+    );
+    const r = hypothesis.result!;
+    await conn.learnings.insert({
+      productId: product.id,
+      hypothesisId: hypothesis.id,
+      kind: learning.kind,
+      direction: learning.direction,
+      statement: learning.statement,
+      explanation: learning.explanation,
+      confidence: r.confidence,
+      evidence: { posts: r.posts, impressions: r.impressions, engagements: r.engagements, visits: r.visits, signups: r.signups, lift: r.lift },
+    });
+    await conn.hypotheses.update(hypothesis.id, { learned: true });
+    written.push(learning.statement);
+  }
+  return `学びを${written.length}件記録しました: ${written.map((w) => `「${w}」`).join("・")}`;
+}
+
+/**
+ * Learning → strategy (spec §9): the strategy is revised when there are new,
+ * decided learnings since it was written — and only in what they support.
+ */
+async function reviseStep(ctx: StepContext): Promise<string> {
+  const { product, conn } = ctx;
+  const [strategy, learnings] = await Promise.all([activeStrategy(product.id, conn), activeLearnings(product.id, conn)]);
+  if (!strategy) throw new StepSkipped("まだ戦略がありません");
+  const fresh = learnings.filter((l) => l.createdAt > strategy.createdAt && l.direction !== "unclear");
+  if (fresh.length === 0) throw new StepSkipped("戦略を変えるほどの新しい学びはありません");
+
+  const { deps } = await depsFor(ctx);
+  const ordered = [...fresh, ...learnings.filter((l) => !fresh.includes(l))];
+  const revision = await runStrategyRevision({ current: strategy, positioning: strategy.positioning, learnings: ordered }, deps);
+  if (!revision) throw new StepSkipped("学びを読みましたが、戦略を変える根拠にはなりませんでした");
+
+  await conn.strategies.insert({
+    productId: product.id,
+    runId: ctx.run.id,
+    version: strategy.version + 1,
+    segmentId: strategy.segmentId,
+    segmentName: strategy.segmentName,
+    positioning: strategy.positioning,
+    coreMessage: revision.coreMessage || strategy.coreMessage,
+    supportingMessages: revision.supportingMessages.length ? revision.supportingMessages : strategy.supportingMessages,
+    pillars: revision.pillars.length ? revision.pillars : strategy.pillars,
+    channels: strategy.channels,
+    acquisition: revision.acquisition.length ? revision.acquisition : strategy.acquisition,
+    conversion: strategy.conversion,
+    retentionReferral: strategy.retentionReferral,
+    rationale: revision.rationale,
+    changes: revision.changes,
+    origin: "revision",
+  });
+  return `学びをもとに戦略を改訂しました: ${revision.changes.map((c) => c.what).join(" / ")}`;
+}
+
+// --- act on the owner's rules -----------------------------------------------
 
 async function autopilotStep({ product, conn, now }: StepContext): Promise<string> {
   const policy = await getPolicy(product.id, conn);
@@ -478,14 +753,19 @@ const STEPS: Record<GrowthStepKind, (context: StepContext) => Promise<string>> =
   product: productStep,
   market: marketStep,
   competitors: competitorsStep,
-  icp: icpStep,
+  audience: audienceStep,
+  positioning: positioningStep,
   strategy: strategyStep,
-  opportunities: opportunitiesStep,
+  experiments: experimentsStep,
+  ideas: ideasStep,
   content: contentStep,
-  metrics: metricsStep,
-  performance: performanceStep,
-  autopilot: autopilotStep,
+  opportunities: opportunitiesStep,
   watch: watchStep,
+  metrics: metricsStep,
+  measure: measureStep,
+  learn: learnStep,
+  revise: reviseStep,
+  autopilot: autopilotStep,
 };
 
 export async function executeStep(

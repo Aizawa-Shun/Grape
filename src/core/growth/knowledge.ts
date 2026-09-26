@@ -1,50 +1,20 @@
 import { z } from "zod";
 
-import { getLatestContext } from "@/core/context/edit";
 import { AppError } from "@/core/errors";
 import { db, type Database } from "@/db/client";
-import type { BrandVoice, Product, ProductKnowledge } from "@/db/schema";
+import type { Fact, KnowledgeTopic, Product, ProductKnowledge } from "@/db/schema";
 
-import { activeStrategy, latestCompetitors, latestIcps, latestInsights } from "./latest";
+import { applyAnswer, LIST_TOPICS, mergeQuestions, normalizeFact, TOPIC_LABELS } from "./facts";
 
 /**
- * The Product Knowledge Base (spec §6): what every growth agent knows about
- * the product before it is asked anything.
+ * The Product Knowledge (spec §3): what Grape knows about the product it is
+ * marketing, fact by fact, each one known or assumed — and what it does not
+ * know yet, kept as questions for the owner.
  *
- * Two layers. The stored `productKnowledge` document is the product itself —
- * summary, problem, USP, angles — written by ProductAnalyzer and correctable
- * by a person. Around it, `loadKnowledgeBase` assembles everything the loop has
- * learned since (ICPs, competitors, insights, the strategy) into the one JSON
- * shape the spec describes, so an agent is never re-deriving the product from
- * scratch.
- *
- * `renderKnowledgePrefix` is what goes in front of every growth prompt. Like
- * context/snapshot.ts it depends only on the stored document — no clock, no
- * run ids — so a day's worth of agent calls share one cached prefix.
+ * Every growth agent reads it as the stable prefix of its prompt
+ * (`renderKnowledgePrefix`), with each fact's status in front of it, so no
+ * agent can mistake an assumption for something the site said.
  */
-
-export interface KnowledgeBase {
-  product: {
-    id: string;
-    name: string;
-    url: string;
-    summary: string;
-    language: string;
-  };
-  target_users: string[];
-  problems: string[];
-  solutions: string[];
-  features: string[];
-  usp: string[];
-  use_cases: string[];
-  pricing: string;
-  competitors: { name: string; url: string | null; positioning: string; verified: boolean }[];
-  marketing_angles: { name: string; description: string }[];
-  icps: { name: string; problem: string; pain: string; keywords: string[] }[];
-  insights: { kind: string; statement: string; grounded: boolean }[];
-  strategy: { positioning: string; messaging: string[]; pillars: { name: string; share: number }[] } | null;
-  brand_voice: BrandVoice | null;
-}
 
 export async function getKnowledge(productId: string, conn: Database = db): Promise<ProductKnowledge | null> {
   return conn.productKnowledge.get(productId);
@@ -60,117 +30,105 @@ export async function requireKnowledge(productId: string, conn: Database = db): 
   return knowledge;
 }
 
-export async function loadKnowledgeBase(productId: string, conn: Database = db): Promise<KnowledgeBase> {
-  const product = await conn.products.get(productId);
-  if (!product) throw new AppError("NOT_FOUND", `Unknown product: ${productId}`);
-  const knowledge = await requireKnowledge(productId, conn);
-  const [icps, competitors, insights, strategy, context] = await Promise.all([
-    latestIcps(productId, conn),
-    latestCompetitors(productId, conn),
-    latestInsights(productId, conn),
-    activeStrategy(productId, conn),
-    getLatestContext(productId, conn),
-  ]);
+const MARK = { known: "確認済み", assumption: "仮説" } as const;
 
-  return {
-    product: {
-      id: product.id,
-      name: product.name,
-      url: product.url,
-      summary: knowledge.summary,
-      language: context?.primaryLanguage ?? "ja",
-    },
-    target_users: [knowledge.targetUser],
-    problems: [knowledge.problem],
-    solutions: [knowledge.solution],
-    features: knowledge.features,
-    usp: knowledge.usp,
-    use_cases: knowledge.useCases,
-    pricing: knowledge.pricing,
-    competitors: competitors.map((c) => ({ name: c.name, url: c.url, positioning: c.positioning, verified: c.verified })),
-    marketing_angles: knowledge.marketingAngles,
-    icps: icps.map((icp) => ({ name: icp.name, problem: icp.problem, pain: icp.pain, keywords: icp.keywords })),
-    insights: insights.map((insight) => ({ kind: insight.kind, statement: insight.statement, grounded: insight.grounded })),
-    strategy: strategy
-      ? {
-          positioning: strategy.positioning,
-          messaging: strategy.messaging,
-          pillars: strategy.pillars.map((pillar) => ({ name: pillar.name, share: pillar.share })),
-        }
-      : null,
-    brand_voice: knowledge.brandVoice,
-  };
+function renderFacts(title: string, facts: Fact[]): string[] {
+  if (facts.length === 0) return [];
+  return ["", `## ${title}`, ...facts.map((fact) => `- [${MARK[fact.status]}] ${fact.text}`)];
 }
 
-/** The stable prompt prefix. See the module comment for why nothing volatile may enter it. */
+/**
+ * The stable prompt prefix. Depends only on the stored rows — no clock, no
+ * run ids — so a day's agent calls share one cached prefix (the same rule as
+ * context/snapshot.ts).
+ */
 export function renderKnowledgePrefix(product: Product, knowledge: ProductKnowledge, language: string): string {
-  const list = (items: string[]) => items.map((item) => `- ${item}`).join("\n");
-  return [
-    "# 対象プロダクト（Product Knowledge Base）",
+  const lines = [
+    "# 対象プロダクト（Product Knowledge）",
     "",
     `名前: ${product.name}`,
     `URL: ${product.url}`,
     `利用者が使う言語: ${language}`,
     "",
-    "## 概要",
-    knowledge.summary,
-    "",
-    "## 解決する課題",
-    knowledge.problem,
-    "",
-    "## 解決のしかた",
-    knowledge.solution,
-    "",
-    "## 想定ユーザー",
-    knowledge.targetUser,
-    "",
-    "## USP（他ではなくこれを選ぶ理由）",
-    list(knowledge.usp),
-    "",
-    "## 主な機能",
-    list(knowledge.features),
-    "",
-    "## 利用シーン",
-    list(knowledge.useCases),
-    "",
-    "## 料金",
-    knowledge.pricing,
-    "",
-    "## マーケティングの切り口",
-    list(knowledge.marketingAngles.map((angle) => `${angle.name}: ${angle.description}`)),
-    "",
-    knowledge.editedByHuman
-      ? "注記: この内容はプロダクトの作者が確認・修正済み。事実として扱ってよい。"
-      : "注記: この内容はサイトからの自動分析で、作者の確認を経ていない。断定しすぎないこと。",
-  ].join("\n");
+    "読み方: [確認済み] はサイトの原文かオーナー本人の言葉で裏付けがある。[仮説] は推測であり、事実として書かない。",
+    ...(knowledge.what ? ["", `## ${TOPIC_LABELS.what}`, `- [${MARK[knowledge.what.status]}] ${knowledge.what.text}`] : []),
+    ...LIST_TOPICS.flatMap((topic) => renderFacts(TOPIC_LABELS[topic], knowledge[topic])),
+  ];
+  if (knowledge.questions.length > 0) {
+    lines.push(
+      "",
+      "## まだ分かっていないこと",
+      ...knowledge.questions.map((q) => `- ${q.question}${q.guess ? `（現時点の推測: ${q.guess}）` : ""}`),
+      "分かっていないことは、あるものとして書かない。",
+    );
+  }
+  return lines.join("\n");
 }
 
-/** What a person may correct from the knowledge page. Brand voice has its own form. */
+const FactSchema = z.object({
+  text: z.string().trim().min(1).max(600),
+  status: z.enum(["known", "assumption"]),
+  basis: z.enum(["site", "owner", "inference"]),
+  evidence: z.array(z.object({ url: z.string().max(2000), quote: z.string().max(1000) })).max(5),
+});
+
+/** What a person may change from the product page: every fact, and nothing structural. */
 export const KnowledgeEditSchema = z.object({
-  summary: z.string().trim().min(1).max(2000),
-  problem: z.string().trim().min(1).max(2000),
-  solution: z.string().trim().min(1).max(2000),
-  targetUser: z.string().trim().min(1).max(2000),
-  usp: z.array(z.string().trim().min(1).max(300)).max(10),
-  useCases: z.array(z.string().trim().min(1).max(300)).max(10),
-  features: z.array(z.string().trim().min(1).max(300)).max(20),
-  pricing: z.string().trim().max(1000),
-  marketingAngles: z
-    .array(z.object({ name: z.string().trim().min(1).max(60), description: z.string().trim().min(1).max(400) }))
-    .max(12),
+  what: FactSchema.nullable(),
+  targetUsers: z.array(FactSchema).max(12),
+  problems: z.array(FactSchema).max(12),
+  benefits: z.array(FactSchema).max(12),
+  features: z.array(FactSchema).max(24),
+  differentiators: z.array(FactSchema).max(12),
+  useCases: z.array(FactSchema).max(12),
+  pricing: z.array(FactSchema).max(12),
+  proof: z.array(FactSchema).max(12),
 });
 export type KnowledgeEdit = z.infer<typeof KnowledgeEditSchema>;
 
-export async function saveKnowledgeEdit(
-  productId: string,
-  edit: KnowledgeEdit,
-  conn: Database = db,
-): Promise<ProductKnowledge> {
+/**
+ * Saves an edit. Each fact passes through `normalizeFact`, so a person can
+ * confirm an assumption (it becomes their word, `owner`) or rewrite one, but
+ * cannot make a fact claim a site source it has no quote for. Questions the
+ * edit has since answered by adding a fact on the topic are not re-asked.
+ */
+export async function saveKnowledgeEdit(productId: string, edit: KnowledgeEdit, conn: Database = db): Promise<ProductKnowledge> {
   const existing = await requireKnowledge(productId, conn);
-  const updated = await conn.productKnowledge.update(productId, {
-    ...edit,
-    editedByHuman: true,
+  const next: ProductKnowledge = {
+    ...existing,
+    what: edit.what ? normalizeFact(edit.what) : null,
+    targetUsers: edit.targetUsers.map(normalizeFact),
+    problems: edit.problems.map(normalizeFact),
+    benefits: edit.benefits.map(normalizeFact),
+    features: edit.features.map(normalizeFact),
+    differentiators: edit.differentiators.map(normalizeFact),
+    useCases: edit.useCases.map(normalizeFact),
+    pricing: edit.pricing.map(normalizeFact),
+    proof: edit.proof.map(normalizeFact),
     updatedAt: new Date(),
-  });
-  return updated ? { ...existing, ...updated } : existing;
+  };
+  // A question the person has answered by writing the fact themselves is closed;
+  // the checklist's are recomputed from what is now known.
+  const openFromModel = existing.questions.filter((q) => !q.id.startsWith("auto-") && !hasOwnerFact(next, q.topic));
+  next.questions = mergeQuestions(openFromModel, next);
+  await conn.productKnowledge.set(productId, next);
+  return next;
+}
+
+function hasOwnerFact(knowledge: ProductKnowledge, topic: KnowledgeTopic): boolean {
+  const facts = topic === "what" ? (knowledge.what ? [knowledge.what] : []) : knowledge[topic];
+  return facts.some((fact) => fact.basis === "owner");
+}
+
+export async function answerQuestion(productId: string, questionId: string, answer: string, conn: Database = db): Promise<ProductKnowledge> {
+  const existing = await requireKnowledge(productId, conn);
+  const answered = applyAnswer(existing, questionId, answer);
+  if (answered === existing) throw new AppError("NOT_FOUND", `No open question ${questionId}`);
+  const next: ProductKnowledge = { ...answered, updatedAt: new Date() };
+  next.questions = mergeQuestions(
+    answered.questions.filter((q) => !q.id.startsWith("auto-")),
+    next,
+  );
+  await conn.productKnowledge.set(productId, next);
+  return next;
 }

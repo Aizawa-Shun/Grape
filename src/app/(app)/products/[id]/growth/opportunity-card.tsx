@@ -43,7 +43,7 @@ export function OpportunityCard({ opportunity, productId }: { opportunity: Oppor
         <Badge tone={hot ? "attention" : "neutral"}>{hot ? "見込みが高い" : INTENT_LABELS[opportunity.intent]}</Badge>
         <span className="text-xs text-text-muted">
           {SOURCE_LABELS[opportunity.source]} ・ {opportunity.author}
-          {opportunity.icpName ? ` ・ ${opportunity.icpName}` : ""}
+          {opportunity.segmentName ? ` ・ ${opportunity.segmentName}` : ""}
         </span>
         <span className="ml-auto text-sm font-semibold tabular-nums">関連度 {opportunity.relevance}%</span>
       </div>

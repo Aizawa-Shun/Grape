@@ -27,6 +27,7 @@ import { setGoal } from "./goals";
 import { advanceRun } from "./runs";
 import { createHackerNewsSource } from "./sources/hackernews";
 import { fetchPublicPage } from "./sources/page";
+import { createSuggestSource } from "./sources/suggest";
 import { AnthropicWebResearcher, WEB_SEARCH_COST_USD, type WebResearcher } from "./sources/web";
 
 interface CallLog {
@@ -113,6 +114,9 @@ async function main() {
   const analysis = await analyzeSaas(pages, provider);
   const extraction = contextFromAnalysis(analysis);
   const product = await conn.products.insert({ userId: "eval", url, name: new URL(url).hostname, keyEventName: "signup" });
+  for (const page of pages) {
+    await conn.crawlPages.insert({ productId: product.id, url: page.url, status: page.status, title: page.title, text: page.text, meta: page.meta, renderedWith: page.renderedWith });
+  }
   await conn.productContexts.insert({
     productId: product.id,
     version: 1,
@@ -131,7 +135,14 @@ async function main() {
 
   await setGoal(product.id, { metric: "signups", target: 100, days: 30 }, conn);
   const { run } = await startGrowthRun(product.id, "eval", "initial", conn);
-  const executor = growthExecutor(conn, { provider, web, hackerNews: createHackerNewsSource(), sources: [createHackerNewsSource()], fetchPage: (u) => fetchPublicPage(u) });
+  const executor = growthExecutor(conn, {
+    provider,
+    web,
+    hackerNews: createHackerNewsSource(),
+    sources: [createHackerNewsSource()],
+    fetchPage: (u) => fetchPublicPage(u),
+    suggest: createSuggestSource(),
+  });
 
   // One step at a time, so each is timed and costed on its own.
   for (const step of run.steps) {
@@ -169,8 +180,10 @@ async function main() {
       knowledge: await conn.productKnowledge.get(product.id),
       insights: await conn.marketInsights.find(),
       competitors: await conn.competitors.find(),
-      icps: await conn.icps.find(),
+      segments: await conn.segments.find(),
+      positioning: await conn.positionings.find(),
       strategy: await conn.strategies.find(),
+      hypotheses: await conn.hypotheses.find(),
       opportunities: await conn.opportunities.find(),
       posts: await conn.posts.find(),
     },

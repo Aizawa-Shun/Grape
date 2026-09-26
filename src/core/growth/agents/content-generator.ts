@@ -1,12 +1,17 @@
 import { z } from "zod";
 
 import { fitToX, xWeightedLength, X_WEIGHTED_LIMIT } from "@/core/action/channels/x-text";
-import type { BrandVoice, GrowthPolicy, PlanSlot, PostType } from "@/db/schema";
+import type { BrandVoice, GrowthPolicy, PostType } from "@/db/schema";
 
 import { COMMON_RULES, type AgentDeps } from "./shared";
 
 /**
- * ContentGenerator: the week's plan, written as posts.
+ * ContentGenerator (spec §7): an idea, written as a post — the "draft" between
+ * idea and review.
+ *
+ * A post is written to test one hypothesis, so it takes that hypothesis's
+ * angle and no other: mixing the angles would leave the results unable to say
+ * which one did the work.
  *
  * Each post is asked for as its parts — hook, body, value, CTA — because that
  * is the structure the spec wants a post thought through in, and because the
@@ -59,8 +64,20 @@ export function charBudget(language: string, withLink: boolean): number {
   return Math.floor((cjk ? room / 2 : room) * 0.85);
 }
 
+/** An idea waiting to be written: a dated post row (its id is the tracking id) with the hypothesis it tests. */
+export interface ContentSlot {
+  /** The post's id — the utm_content its link carries, so it exists before the text does. */
+  id: string;
+  date: string;
+  pillar: string;
+  postType: PostType;
+  topic: string;
+  hypothesis: { statement: string; subject: string } | null;
+}
+
 export interface PostDraft {
   slotIndex: number;
+  slotId: string;
   postType: PostType;
   pillar: string;
   plannedFor: string;
@@ -79,7 +96,9 @@ export interface PostDraft {
 export const LINK_RESERVE = 24;
 
 export interface ContentGeneratorInput {
-  slots: (PlanSlot & { date: string })[];
+  slots: ContentSlot[];
+  /** The strategy's one message, which every post carries in some form. */
+  coreMessage: string | null;
   brandVoice: BrandVoice | null;
   userPhrases: string[];
   icpNames: string[];
@@ -168,7 +187,8 @@ export async function runContentGenerator(input: ContentGeneratorInput, deps: Ag
 - 宣伝の強さ: ${PROMOTION[intensity]}
 - ${competitorRule(input.policy)}
 - 「必ず」「絶対」「No.1」などの誇張、入力に無い実績や数字は書かない。
-- 見込みユーザー自身の言い回しがあれば、Hookで使う。${COMMON_RULES}
+- 見込みユーザー自身の言い回しがあれば、Hookで使う。
+- 「検証する仮説」がある投稿は、その切り口（subject）だけで書く。別の切り口を混ぜない。仮説そのものは本文に書かない（実験は読者に見せない）。${COMMON_RULES}
 
 # 作者の文体
 ${renderBrandVoice(input.brandVoice)}`;
@@ -176,9 +196,14 @@ ${renderBrandVoice(input.brandVoice)}`;
   const user = [
     "# 書く投稿（計画）",
     input.slots
-      .map((slot, index) => `[${index}] ${slot.date} / ${slot.pillar} / ${slot.postType}（${POST_TYPE_GUIDE[slot.postType]}）/ テーマ: ${slot.topic}`)
+      .map(
+        (slot, index) =>
+          `[${index}] ${slot.date} / ${slot.pillar} / ${slot.postType}（${POST_TYPE_GUIDE[slot.postType]}）/ テーマ: ${slot.topic}` +
+          (slot.hypothesis ? `\n    検証する仮説: ${slot.hypothesis.statement}\n    この投稿の切り口: ${slot.hypothesis.subject}` : ""),
+      )
       .join("\n"),
     "",
+    input.coreMessage ? `# 中心メッセージ（すべての発信に通す）\n${input.coreMessage}\n` : "",
     "# 見込みユーザーの言い回し",
     input.userPhrases.slice(0, 12).map((p) => `- ${p}`).join("\n") || "(なし)",
     "",
@@ -230,6 +255,7 @@ ${renderBrandVoice(input.brandVoice)}`;
     used.add(post.slot);
     drafts.push({
       slotIndex: post.slot,
+      slotId: slot.id,
       postType: slot.postType,
       pillar: slot.pillar,
       plannedFor: slot.date,

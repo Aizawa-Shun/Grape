@@ -58,16 +58,16 @@ describe("scoreCandidates", () => {
     const shortlist = [candidate("1", "Is there a tool for this?"), candidate("2", "How do I do this?")];
     const scored = await scoreCandidates(shortlist, {
       provider: provider([
-        { index: 0, relevance: 90, reasons: ["問題が一致"], intent: "seeking_solution", icpName: "", recommendedAction: "reply" },
-        { index: 1, relevance: 80, reasons: [], intent: "question", icpName: "", recommendedAction: "reply" },
-        { index: 7, relevance: 99, reasons: ["?"], intent: "question", icpName: "", recommendedAction: "reply" },
+        { index: 0, relevance: 90, reasons: ["問題が一致"], intent: "seeking_solution", segmentName: "", recommendedAction: "reply" },
+        { index: 1, relevance: 80, reasons: [], intent: "question", segmentName: "", recommendedAction: "reply" },
+        { index: 7, relevance: 99, reasons: ["?"], intent: "question", segmentName: "", recommendedAction: "reply" },
       ]),
       system: "",
       language: "en",
-      icps: [],
+      segments: [],
     });
     expect(scored.map((s) => s.externalId)).toEqual(["1"]);
-    expect(scored[0].icpName).toBeNull();
+    expect(scored[0].segmentName).toBeNull();
   });
 });
 

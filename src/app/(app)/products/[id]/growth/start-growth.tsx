@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
-import { controlClass } from "@/components/ui/field";
+import { inlineControlClass } from "@/components/ui/field";
 import { Status } from "@/components/ui/status";
 
 import { send } from "./request";
@@ -18,7 +18,7 @@ export function StartGrowth({ productId, productName }: { productId: string; pro
   const router = useRouter();
   const [target, setTarget] = useState("100");
   const [days, setDays] = useState("30");
-  const [metric, setMetric] = useState<"signups" | "visitors">("signups");
+  const [metric, setMetric] = useState<"signups" | "activations" | "paid" | "visitors">("signups");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -39,8 +39,8 @@ export function StartGrowth({ productId, productName }: { productId: string; pro
       <div className="flex flex-col gap-1.5">
         <h2 className="text-lg font-semibold tracking-tight">{productName}を、何人に使ってもらいますか？</h2>
         <p className="text-sm text-text-muted">
-          目標を決めると、AIが市場・競合・見込み客を調べて、最初のグロース計画と投稿案を作ります。
-          あなたがやるのは、出てきた案を承認することだけです。
+          Grapeがあなたの製品と市場を調べ、誰に何を言うかを決め、確かめたい仮説と1週間分の投稿を用意します。
+          結果を見て、何が効いたかを学び、次の戦略を直していきます。あなたがやるのは、投稿の確認と承認です。
         </p>
       </div>
 
@@ -50,11 +50,13 @@ export function StartGrowth({ productId, productName }: { productId: string; pro
           inputMode="numeric"
           value={days}
           onChange={(e) => setDays(e.target.value)}
-          className={`${controlClass} w-20 text-right tabular-nums`}
+          className={`${inlineControlClass} w-20 text-right tabular-nums`}
         />
         <span>日で</span>
-        <select aria-label="数えるもの" value={metric} onChange={(e) => setMetric(e.target.value as "signups" | "visitors")} className={`${controlClass} w-auto`}>
+        <select aria-label="数えるもの" value={metric} onChange={(e) => setMetric(e.target.value as typeof metric)} className={`${inlineControlClass} w-auto`}>
           <option value="signups">登録ユーザー</option>
+          <option value="activations">アクティブユーザー</option>
+          <option value="paid">有料ユーザー</option>
           <option value="visitors">訪問者</option>
         </select>
         <span>を</span>
@@ -63,7 +65,7 @@ export function StartGrowth({ productId, productName }: { productId: string; pro
           inputMode="numeric"
           value={target}
           onChange={(e) => setTarget(e.target.value)}
-          className={`${controlClass} w-24 text-right tabular-nums`}
+          className={`${inlineControlClass} w-24 text-right tabular-nums`}
         />
         <span>人</span>
       </div>

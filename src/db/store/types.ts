@@ -64,7 +64,7 @@ export interface Collection<T extends { id: string }, D extends keyof T = never>
 export interface Defaults {
   users: "role" | "anthropicApiKey" | "openaiApiKey" | "createdAt" | "lastLoginAt";
   invites: "invitedBy" | "usedAt" | "usedBy" | "createdAt";
-  products: "keyEventName" | "setupStatus" | "setupError" | "setupClaimedAt" | "createdAt";
+  products: "keyEventName" | "signupEventName" | "paidEventName" | "setupStatus" | "setupError" | "setupClaimedAt" | "createdAt";
   productContexts: "confidence" | "gaps" | "analysis" | "primaryLanguage" | "editedByHuman" | "createdAt";
   crawlPages: "title" | "text" | "meta" | "renderedWith" | "fetchedAt";
   events: "path" | "referrer" | "utm";
@@ -85,15 +85,20 @@ export interface Defaults {
   settings: "updatedAt";
   growthRuns: "status" | "claimedAt" | "createdAt" | "finishedAt";
   growthGoals: "status" | "createdAt";
-  productKnowledge: "brandVoice" | "editedByHuman" | "updatedAt";
+  productKnowledge: "what" | "targetUsers" | "problems" | "benefits" | "features" | "differentiators" | "useCases" | "pricing" | "proof" | "questions" | "brandVoice" | "updatedAt";
   marketInsights: "userPhrases" | "sources" | "grounded" | "createdAt";
   competitors: "url" | "xHandle" | "sources" | "verified" | "snapshot" | "snapshotAt" | "createdAt";
-  icps: "createdAt";
-  strategies: "runId" | "origin" | "createdAt";
-  opportunities: "runId" | "postedAt" | "icpName" | "status" | "createdAt";
+  segments: "evidence" | "confidence" | "status" | "createdAt";
+  positionings: "createdAt";
+  hypotheses: "basisInsights" | "targetPosts" | "status" | "result" | "learned" | "createdAt" | "concludedAt";
+  learnings: "hypothesisId" | "source" | "status" | "createdAt";
+  strategies: "runId" | "segmentId" | "changes" | "origin" | "createdAt";
+  opportunities: "runId" | "postedAt" | "segmentName" | "status" | "createdAt";
   posts:
     | "runId"
     | "pillar"
+    | "hypothesisId"
+    | "topic"
     | "draftText"
     | "assetNeeded"
     | "opportunityId"
@@ -138,7 +143,7 @@ export function defaultsFor(name: CollectionName, now: Date): Record<string, unk
     case "invites":
       return { invitedBy: null, usedAt: null, usedBy: null, createdAt: now };
     case "products":
-      return { keyEventName: null, setupStatus: "ready", setupError: null, setupClaimedAt: null, createdAt: now };
+      return { keyEventName: null, signupEventName: null, paidEventName: null, setupStatus: "ready", setupError: null, setupClaimedAt: null, createdAt: now };
     case "productContexts":
       return {
         confidence: null,
@@ -187,21 +192,42 @@ export function defaultsFor(name: CollectionName, now: Date): Record<string, unk
     case "growthGoals":
       return { status: "active", createdAt: now };
     case "productKnowledge":
-      return { brandVoice: null, editedByHuman: false, updatedAt: now };
+      return {
+        what: null,
+        targetUsers: [],
+        problems: [],
+        benefits: [],
+        features: [],
+        differentiators: [],
+        useCases: [],
+        pricing: [],
+        proof: [],
+        questions: [],
+        brandVoice: null,
+        updatedAt: now,
+      };
     case "marketInsights":
       return { userPhrases: [], sources: [], grounded: false, createdAt: now };
     case "competitors":
       return { url: null, xHandle: null, sources: [], verified: false, snapshot: null, snapshotAt: null, createdAt: now };
-    case "icps":
+    case "segments":
+      return { evidence: [], confidence: "low", status: "hypothesis", createdAt: now };
+    case "positionings":
       return { createdAt: now };
+    case "hypotheses":
+      return { basisInsights: [], targetPosts: 5, status: "testing", result: null, learned: false, createdAt: now, concludedAt: null };
+    case "learnings":
+      return { hypothesisId: null, source: "experiment", status: "active", createdAt: now };
     case "strategies":
-      return { runId: null, origin: "planner", createdAt: now };
+      return { runId: null, segmentId: null, changes: [], origin: "planner", createdAt: now };
     case "opportunities":
-      return { runId: null, postedAt: null, icpName: null, status: "new", createdAt: now };
+      return { runId: null, postedAt: null, segmentName: null, status: "new", createdAt: now };
     case "posts":
       return {
         runId: null,
         pillar: null,
+        hypothesisId: null,
+        topic: null,
         draftText: null,
         assetNeeded: null,
         opportunityId: null,

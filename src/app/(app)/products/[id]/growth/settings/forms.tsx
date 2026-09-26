@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Field, controlClass } from "@/components/ui/field";
+import { Field, controlClass, inlineControlClass } from "@/components/ui/field";
 import { Status } from "@/components/ui/status";
 import type { BrandVoice, GrowthPolicy } from "@/db/schema";
 
@@ -42,7 +42,9 @@ function Footer({ pending, saved, error, label = "保存する" }: { pending: bo
   );
 }
 
-export function GoalForm({ productId, initial }: { productId: string; initial: { metric: "signups" | "visitors"; target: number; days: number } }) {
+type Metric = "visitors" | "signups" | "activations" | "paid";
+
+export function GoalForm({ productId, initial }: { productId: string; initial: { metric: Metric; target: number; days: number } }) {
   const [metric, setMetric] = useState(initial.metric);
   const [target, setTarget] = useState(String(initial.target));
   const [days, setDays] = useState(String(initial.days));
@@ -57,14 +59,16 @@ export function GoalForm({ productId, initial }: { productId: string; initial: {
     >
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span>今日から</span>
-        <input aria-label="日数" inputMode="numeric" value={days} onChange={(e) => setDays(e.target.value)} className={`${controlClass} w-20 text-right`} />
+        <input aria-label="日数" inputMode="numeric" value={days} onChange={(e) => setDays(e.target.value)} className={`${inlineControlClass} w-20 text-right`} />
         <span>日で</span>
-        <select aria-label="数えるもの" value={metric} onChange={(e) => setMetric(e.target.value as "signups" | "visitors")} className={`${controlClass} w-auto`}>
+        <select aria-label="数えるもの" value={metric} onChange={(e) => setMetric(e.target.value as Metric)} className={`${inlineControlClass} w-auto`}>
           <option value="signups">登録ユーザー</option>
+          <option value="activations">アクティブユーザー</option>
+          <option value="paid">有料ユーザー</option>
           <option value="visitors">訪問者</option>
         </select>
         <span>を</span>
-        <input aria-label="目標の人数" inputMode="numeric" value={target} onChange={(e) => setTarget(e.target.value)} className={`${controlClass} w-24 text-right`} />
+        <input aria-label="目標の人数" inputMode="numeric" value={target} onChange={(e) => setTarget(e.target.value)} className={`${inlineControlClass} w-24 text-right`} />
         <span>人</span>
       </div>
       <p className="text-xs text-text-muted">新しい目標は今日から数え直します。前の目標は記録に残ります。</p>
@@ -112,7 +116,7 @@ export function PolicyForm({ productId, policy }: { productId: string; policy: G
 
   const number = (key: keyof typeof form, label: string, hint?: string) => (
     <Field label={label} hint={hint}>
-      {(props) => <input {...props} inputMode="numeric" value={form[key]} onChange={set(key)} className={`${controlClass} w-28`} />}
+      {(props) => <input {...props} inputMode="numeric" value={form[key]} onChange={set(key)} className={`${inlineControlClass} w-28`} />}
     </Field>
   );
 
@@ -140,7 +144,7 @@ export function PolicyForm({ productId, policy }: { productId: string; policy: G
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="宣伝の強さ" hint="1 = 製品にほぼ触れない ／ 5 = 積極的に紹介する">
           {(props) => (
-            <select {...props} value={form.promotionalIntensity} onChange={set("promotionalIntensity")} className={`${controlClass} w-auto`}>
+            <select {...props} value={form.promotionalIntensity} onChange={set("promotionalIntensity")} className={`${inlineControlClass} w-auto`}>
               {[1, 2, 3, 4, 5].map((n) => (
                 <option key={n} value={n}>
                   {n}
@@ -151,7 +155,7 @@ export function PolicyForm({ productId, policy }: { productId: string; policy: G
         </Field>
         <Field label="競合への言及">
           {(props) => (
-            <select {...props} value={form.competitorMentions} onChange={set("competitorMentions")} className={`${controlClass} w-auto`}>
+            <select {...props} value={form.competitorMentions} onChange={set("competitorMentions")} className={`${inlineControlClass} w-auto`}>
               <option value="never">名前を出さない</option>
               <option value="neutral">中立に触れてよい</option>
               <option value="allowed">比較してよい</option>
@@ -162,10 +166,10 @@ export function PolicyForm({ productId, policy }: { productId: string; policy: G
 
       <div className="flex flex-wrap items-end gap-2 text-sm">
         <Field label="自動で投稿しない時間帯（日本時間）">
-          {(props) => <input {...props} inputMode="numeric" value={form.quietHoursStart} onChange={set("quietHoursStart")} className={`${controlClass} w-20`} />}
+          {(props) => <input {...props} inputMode="numeric" value={form.quietHoursStart} onChange={set("quietHoursStart")} className={`${inlineControlClass} w-20`} />}
         </Field>
         <span className="pb-2">時 〜</span>
-        <input aria-label="終了時刻" inputMode="numeric" value={form.quietHoursEnd} onChange={set("quietHoursEnd")} className={`${controlClass} w-20`} />
+        <input aria-label="終了時刻" inputMode="numeric" value={form.quietHoursEnd} onChange={set("quietHoursEnd")} className={`${inlineControlClass} w-20`} />
         <span className="pb-2">時</span>
       </div>
 
@@ -211,6 +215,46 @@ export function BrandVoiceForm({ productId, voice }: { productId: string; voice:
         {(props) => <textarea {...props} rows={8} value={samples} onChange={(e) => setSamples(e.target.value)} className={controlClass} />}
       </Field>
       <Footer pending={pending} saved={saved} error={error} label={voice ? "文体を学び直す" : "文体を学ばせる"} />
+    </form>
+  );
+}
+
+/**
+ * Which tracked events mean "signed up" and "paid". Without them the funnel
+ * stops at the site visit, and experiments can only be judged on clicks.
+ */
+export function EventsForm({
+  productId,
+  initial,
+  activation,
+}: {
+  productId: string;
+  initial: { signupEventName: string; paidEventName: string };
+  activation: string | null;
+}) {
+  const [signup, setSignup] = useState(initial.signupEventName);
+  const [paid, setPaid] = useState(initial.paidEventName);
+  const { save, error, saved, pending } = useSave();
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        save(`/api/growth/${productId}/events`, "PUT", { signupEventName: signup, paidEventName: paid });
+      }}
+      className="flex flex-col gap-4"
+    >
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="登録のイベント名" hint={"サイトで grape('track', '<名前>') を呼ぶときの名前。例: signup"}>
+          {(props) => <input {...props} value={signup} onChange={(e) => setSignup(e.target.value)} placeholder="signup" className={controlClass} />}
+        </Field>
+        <Field label="課金のイベント名" hint="例: purchase。無ければ空欄のままで構いません。">
+          {(props) => <input {...props} value={paid} onChange={(e) => setPaid(e.target.value)} placeholder="purchase" className={controlClass} />}
+        </Field>
+      </div>
+      <p className="text-xs text-text-muted">
+        アクティベーションは、サイト全体の診断と同じキーイベント（{activation ? `いまは「${activation}」` : "未設定"}）を使います。「設定」ページで変えられます。
+      </p>
+      <Footer pending={pending} saved={saved} error={error} />
     </form>
   );
 }

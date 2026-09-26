@@ -5,7 +5,7 @@ import { createMemoryStore } from "@/db/store/memory";
 
 import { advanceRun, claimNextStep, createRun, driveRun, RUN_LEASE_MS, StepSkipped, type StepExecutor } from "./runs";
 
-async function setup(steps: ("market" | "icp" | "strategy")[] = ["market", "icp", "strategy"]) {
+async function setup(steps: ("market" | "audience" | "strategy")[] = ["market", "audience", "strategy"]) {
   const conn = createMemoryStore();
   const { run } = await createRun({ productId: "p1", userId: "u1", kind: "manual", steps }, conn);
   return { conn, run };
@@ -42,7 +42,7 @@ describe("advanceRun", () => {
       return `${step.kind} done`;
     };
     const finished = await driveRun(run.id, execute, 10_000, conn);
-    expect(seen).toEqual(["market", "icp", "strategy"]);
+    expect(seen).toEqual(["market", "audience", "strategy"]);
     expect(finished?.status).toBe("completed");
     expect(finished?.steps.every((s) => s.status === "completed")).toBe(true);
     expect((await conn.agentActions.find()).length).toBe(3);

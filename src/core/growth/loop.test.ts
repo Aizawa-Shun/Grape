@@ -1,157 +1,30 @@
 import { describe, expect, it } from "vitest";
 
-import { EMPTY_USAGE, type LLMProvider, type StructuredCompletionRequest } from "@/core/llm/types";
+import type { Database } from "@/db/client";
 import { createMemoryStore } from "@/db/store/memory";
 
-import { planSteps, startGrowthRun, growthExecutor } from "./agent";
-import { loadGrowthDashboard } from "./dashboard";
+import { growthExecutor, planSteps, startGrowthRun } from "./agent";
+import { loadBrainView } from "./dashboard";
 import { setGoal } from "./goals";
-import { markPublished } from "./publish";
 import { driveRun } from "./runs";
-import { writePosts, type StepServices } from "./steps";
-import type { ConversationSource } from "./sources/types";
+import { fakeServices } from "./testing/fake-brain";
 
 /**
- * The Definition of Done (spec §38), end to end, against fakes for the model
- * and the outside world: URL → understanding → research → ICP → competitors
- * → strategy → opportunities → drafts → approve → publish → results →
- * the next proposal. Every step goes through the real job engine, the real
- * agents' parsing and the real persistence; only the model's answers and the
- * network are canned.
+ * The MVP loop (spec §10), end to end, against fakes for the model and the
+ * outside world only:
+ *
+ *   URL → product → market → audience → positioning → strategy → hypotheses
+ *   → ideas → drafts → [published] → measurement → verdict → learning
+ *   → strategy revision → the next hypotheses
+ *
+ * Every step goes through the real job engine, the real agents' parsing and
+ * the real code-side decisions (fact verification, confidence, focus, the
+ * verdict); only what the model says and what the network returns is canned.
  */
-
-type Answer = (req: StructuredCompletionRequest<unknown>) => unknown;
-
-const ANSWERS: Record<string, Answer> = {
-  product_knowledge: () => ({
-    summary: "個人開発者のSaaSにユーザーを連れてくるツール。",
-    problem: "作ったSaaSにユーザーが来ない。",
-    solution: "見込み客の会話を見つけて、返信と投稿を用意する。",
-    targetUser: "MVPを出したばかりの個人開発者",
-    usp: ["URLを入れるだけ"],
-    useCases: ["リリース直後の集客"],
-    features: ["見込み客探索", "投稿案の作成"],
-    pricing: "無料",
-    marketingAngles: [{ name: "Time saving", description: "集客の時間を減らす" }],
-  }),
-  market_query_plan: () => ({ queries: ["ユーザーが来ない"], englishQueries: ["first users saas"] }),
-  market_research: () => ({
-    insights: [
-      { kind: "pain", statement: "作っても誰にも使われない。", userPhrases: ["nobody uses my app"], sourceUrls: ["https://news.ycombinator.com/item?id=101"] },
-      { kind: "trend", statement: "AIで作る個人開発が増えている。", userPhrases: [], sourceUrls: ["https://made-up.example/"] },
-    ],
-  }),
-  competitor_candidates: () => ({ candidates: [{ name: "RivalApp", url: "rival.example", kind: "direct" }, { name: "Spreadsheets", url: "", kind: "alternative" }] }),
-  competitor_analysis: () => ({
-    competitors: [
-      {
-        name: "RivalApp",
-        pricing: "$29/mo",
-        positioning: "SNS予約投稿",
-        targetAudience: "マーケター",
-        features: ["予約投稿"],
-        messaging: "Schedule everything",
-        xHandle: "@rivalapp",
-        contentStrategy: "機能紹介",
-        strengths: ["安定"],
-        weaknesses: ["見込み客は探さない"],
-        differentiation: "こちらは会話を探す",
-        sourceUrls: [],
-      },
-    ],
-    gaps: [{ statement: "開発者向けに『最初の10人』を扱う競合がいない。", sourceUrls: [] }],
-  }),
-  icps: () => ({
-    icps: [
-      {
-        name: "初めてMVPを出した個人開発者",
-        role: "エンジニア",
-        companySize: "1人",
-        technicalLevel: "高い",
-        problem: "ユーザーが来ない",
-        pain: "時間をかけたのに誰も使わない",
-        goal: "最初の100人",
-        buyingTrigger: "リリース直後",
-        currentAlternatives: ["X", "Product Hunt"],
-        channels: ["X", "Hacker News"],
-        keywords: ["first users", "saas"],
-        xPhrases: ["ユーザーが来ない"],
-      },
-    ],
-  }),
-  marketing_strategy: () => ({
-    positioning: "個人開発者の最初の100人を、会話から連れてくる。",
-    messaging: ["作ったら、あとはAIが探す"],
-    pillars: [
-      { name: "Educational", share: 60, description: "集客のノウハウ", postTypes: ["educational"], topicIdeas: ["最初の10人の集め方"] },
-      { name: "Build in public", share: 40, description: "開発の裏側", postTypes: ["build_in_public"], topicIdeas: ["今週の数字"] },
-    ],
-    channels: [{ name: "X", priority: 1, rationale: "ICPがいる" }],
-    shortTerm: ["毎日1本投稿する"],
-    midTerm: ["事例を作る"],
-    rationale: "ICPはXとHNにいる。",
-  }),
-  opportunity_search_plan: () => ({ phrases: ["ユーザーが来ない"], englishQueries: ["first users"] }),
-  opportunity_scores: () => ({
-    results: [{ index: 0, relevance: 91, reasons: ["ICPと問題が一致", "解決策を探している"], intent: "seeking_solution", icpName: "初めてMVPを出した個人開発者", recommendedAction: "reply" }],
-  }),
-  x_posts: (req) => {
-    const count = (req.user.match(/^\[\d+\]/gm) ?? []).length;
-    return {
-      posts: Array.from({ length: count }, (_, slot) => ({
-        slot,
-        hook: "作ったのに誰も使ってくれない？",
-        body: "最初の10人は、同じ悩みを書いている人への返信から来ました。",
-        cta: "",
-        includeLink: slot === 0,
-        assetNeeded: "",
-        rationale: "問題から入る",
-      })),
-    };
-  },
-  reply: () => ({ reply: "最初は、同じ問題を書いている人に直接返信するのが一番早かったです。", bridge: "自分もそのために小さなツールを作っています。", approach: "自分の経験を共有" }),
-  performance_analysis: () => ({
-    worked: ["問題から入るHookが反応を集めた"],
-    failed: ["開発の裏側は訪問につながらなかった"],
-    recommendation: "機能紹介より、具体的なHow-to投稿を増やす。",
-    nextActions: ["How-toを週3本"],
-  }),
-};
-
-function fakeProvider(calls: string[]): LLMProvider {
-  return {
-    name: "fake",
-    model: "fake",
-    health: async () => ({ ok: true, provider: "fake", model: "fake", detail: "" }),
-    completeText: async () => ({ value: "", usage: EMPTY_USAGE, model: "fake" }),
-    async completeStructured<T>(req: StructuredCompletionRequest<T>) {
-      calls.push(req.schemaName);
-      const answer = ANSWERS[req.schemaName];
-      if (!answer) throw new Error(`No canned answer for ${req.schemaName}`);
-      // Parsed through the agent's own schema, as a real provider's output is.
-      return { value: req.schema.parse(answer(req as StructuredCompletionRequest<unknown>)), usage: EMPTY_USAGE, model: "fake" };
-    },
-  };
-}
-
-const hackerNews: ConversationSource = {
-  name: "hackernews",
-  available: () => true,
-  search: async () => [
-    {
-      source: "hackernews",
-      externalId: "101",
-      url: "https://news.ycombinator.com/item?id=101",
-      author: "maker",
-      text: "I built a SaaS with AI but nobody uses it. Is there a tool to find my first users?",
-      postedAt: new Date(),
-    },
-  ],
-};
 
 async function seedProduct() {
   const conn = createMemoryStore();
-  const product = await conn.products.insert({ userId: "u1", url: "https://indie.example/", name: "IndieGrow", keyEventName: "signup" });
+  const product = await conn.products.insert({ userId: "u1", url: "https://indie.example/", name: "IndieGrow", keyEventName: null });
   await conn.productContexts.insert({
     productId: product.id,
     version: 1,
@@ -163,128 +36,166 @@ async function seedProduct() {
     primaryLanguage: "ja",
     editedByHuman: true,
   });
+  await conn.crawlPages.insert({
+    productId: product.id,
+    url: "https://indie.example/",
+    status: 200,
+    title: "IndieGrow",
+    text: "Grow your indie SaaS. Built it, but nobody came? Finds people asking for tools like yours. Used by 120 indie makers.",
+  });
+  await conn.crawlPages.insert({ productId: product.id, url: "https://indie.example/pricing", status: 200, title: "Pricing", text: "Only pay when you get users." });
   return { conn, product };
 }
 
-describe("the growth loop", () => {
-  it("goes from a registered URL to drafts, and from a published post to the next proposal", async () => {
+/** Publishes every written or planned post of a hypothesis, with the reach and visitors given. */
+async function publishFor(conn: Database, productId: string, hypothesisId: string, impressions: number, visitorsPerPost: number) {
+  const posts = (await conn.posts.find({ where: [["productId", "==", productId]] })).filter((p) => p.hypothesisId === hypothesisId && p.status !== "rejected");
+  const publishedAt = new Date(Date.now() - 3 * 86_400_000);
+  for (const post of posts) {
+    await conn.posts.update(post.id, {
+      status: "published",
+      text: post.text || `${post.topic}`,
+      publishedAt,
+      decidedAt: publishedAt,
+      metrics: { impressions, likes: 5, replies: 0, reposts: 0, quotes: 0, bookmarks: 0, profileVisits: null, linkClicks: null, source: "manual" },
+    });
+    for (let v = 0; v < visitorsPerPost; v++) {
+      await conn.events.insert({
+        productId,
+        anonId: `${post.id}-${v}`,
+        sessionId: `${post.id}-${v}`,
+        name: "pageview",
+        utm: { utm_campaign: "grape", utm_content: post.id },
+        ts: new Date(publishedAt.getTime() + 60_000),
+      });
+    }
+  }
+  return posts.length;
+}
+
+describe("the Marketing Brain loop", () => {
+  it("understands, decides, executes, measures, learns — and changes its strategy because of what it learned", async () => {
     const { conn, product } = await seedProduct();
     const calls: string[] = [];
-    const services: StepServices = {
-      provider: fakeProvider(calls),
-      web: null,
-      hackerNews,
-      sources: [hackerNews],
-      fetchPage: async (url) =>
-        url.includes("rival.example")
-          ? { url, title: "RivalApp", text: "Schedule everything", meta: {}, sections: [], ctas: [], prices: ["$29"], links: [], manifestUrl: null }
-          : null,
-    };
 
-    // Goal, then the first full run.
     await setGoal(product.id, { metric: "signups", target: 100, days: 30 }, conn);
     const { run } = await startGrowthRun(product.id, "u1", "initial", conn);
-    const finished = await driveRun(run.id, growthExecutor(conn, services), 60_000, conn);
+    const first = await driveRun(run.id, growthExecutor(conn, fakeServices(calls)), 60_000, conn);
 
-    expect(finished?.status).toBe("completed");
-    expect(finished?.steps.map((s) => [s.kind, s.status])).toEqual([
+    expect(first?.status).toBe("completed");
+    expect(first?.steps.map((s) => [s.kind, s.status])).toEqual([
       ["product", "completed"],
       ["market", "completed"],
       ["competitors", "completed"],
-      ["icp", "completed"],
+      ["audience", "completed"],
+      ["positioning", "completed"],
       ["strategy", "completed"],
-      ["opportunities", "completed"],
+      ["experiments", "completed"],
+      ["ideas", "completed"],
       ["content", "completed"],
+      ["opportunities", "completed"],
     ]);
 
-    // Understanding and research were saved where the next agents read them.
-    expect((await conn.productKnowledge.get(product.id))?.marketingAngles).toHaveLength(1);
-    const insights = await conn.marketInsights.find();
-    // Only the URL actually fetched counts as a source; the invented one does not.
-    expect(insights.find((i) => i.kind === "pain")).toMatchObject({ grounded: true });
-    expect(insights.find((i) => i.kind === "trend")).toMatchObject({ grounded: false, sources: [] });
-    expect(insights.some((i) => i.kind === "gap")).toBe(true);
-    const competitors = await conn.competitors.find();
-    expect(competitors.find((c) => c.name === "RivalApp")).toMatchObject({ verified: true, xHandle: "@rivalapp" });
-
-    // The strategy adds up, and the week is planned.
-    const [strategy] = await conn.strategies.find();
-    expect(strategy.pillars.reduce((s, p) => s + p.share, 0)).toBe(100);
-    expect(strategy.weeklyPlan).toHaveLength(7);
-
-    // An opportunity with its reasons, and a reply drafted for it.
-    const [opportunity] = await conn.opportunities.find();
-    expect(opportunity).toMatchObject({ relevance: 91, status: "drafted" });
-    expect(opportunity.reasons.length).toBeGreaterThan(0);
-
-    const posts = await conn.posts.find();
-    const drafts = posts.filter((p) => p.kind === "post");
-    const reply = posts.find((p) => p.kind === "reply")!;
-    expect(drafts).toHaveLength(3); // three days drafted ahead
-    // The answer comes first; at the default intensity the product is mentioned
-    // only because this person is actively looking and the match is strong.
-    expect(reply.text.startsWith("最初は、同じ問題を")).toBe(true);
-    expect(reply.text).toContain("自分もそのために");
-    const linked = drafts.find((p) => p.trackingUrl)!;
-    expect(linked.trackingUrl).toContain(`utm_content=${linked.id}`);
-    expect(linked.text).toContain(linked.trackingUrl!);
-
-    // The dashboard explains itself before any results exist.
-    const before = await loadGrowthDashboard(product.id, conn);
-    expect(before.feed).toHaveLength(1);
-    expect(before.recommendation.headline).toContain("解決策を探している人");
-
-    // Approve → publish (by hand, as without X credentials) → people arrive from the link and sign up.
-    for (const post of drafts) await markPublished(post.id, null, { database: conn });
-    const tagged = { utm_campaign: "grape", utm_content: linked.id };
-    await conn.events.insert({ productId: product.id, anonId: "a1", sessionId: "s1", name: "pageview", utm: tagged, ts: new Date() });
-    await conn.events.insert({ productId: product.id, anonId: "a1", sessionId: "s1", name: "signup", ts: new Date(Date.now() + 1000) });
-
-    // The next daily run reads the results and learns.
-    expect(await planSteps(product.id, "daily", conn)).toEqual(["metrics", "performance", "watch", "opportunities", "content"]);
-    const { run: daily } = await startGrowthRun(product.id, "u1", "daily", conn);
-    const learned = await driveRun(daily.id, growthExecutor(conn, services), 60_000, conn);
-    expect(learned?.steps.find((s) => s.kind === "metrics")?.status).toBe("skipped"); // no X credentials: site data only
-    expect(learned?.steps.find((s) => s.kind === "performance")?.status).toBe("completed");
-    // RivalApp's homepage reads the same as last week: checked, nothing to report.
-    expect(learned?.steps.find((s) => s.kind === "watch")).toMatchObject({ status: "completed", summary: expect.stringContaining("変化はありません") });
-
-    const [report] = await conn.analyticsReports.find();
-    expect(report.recommendation).toContain("How-to");
-    expect(report.stats.reduce((s, t) => s + t.signups, 0)).toBe(1);
-
-    const after = await loadGrowthDashboard(product.id, conn);
-    expect(after.progress).toMatchObject({ current: 1, target: 100 });
-    expect(after.week).toMatchObject({ posts: 3, visits: 1, signups: 1 });
-    expect(after.recommendation).toMatchObject({ source: "analysis" });
-    expect(after.activity.length).toBeGreaterThan(5);
-  });
-
-  it("writes a one-off post from a conversation without taking a day in the plan", async () => {
-    const { conn, product } = await seedProduct();
-    await conn.productKnowledge.set(product.id, {
-      productId: product.id,
-      summary: "s",
-      problem: "p",
-      solution: "s",
-      targetUser: "t",
-      usp: [],
-      useCases: [],
-      features: [],
-      pricing: "",
-      marketingAngles: [],
-      contextVersion: 1,
-    });
+    // Product: known only where the quote is really on the page; the rest are assumptions or questions.
     const knowledge = (await conn.productKnowledge.get(product.id))!;
-    const [post] = await writePosts(
-      product,
-      knowledge,
-      [{ day: 0, pillar: "Problem awareness", postType: "problem_awareness", topic: "t", date: "2026-09-26" }],
-      { provider: fakeProvider([]), system: "", language: "ja" },
-      conn,
-      { plan: false },
-    );
-    expect(post).toMatchObject({ kind: "post", status: "draft", plannedFor: null });
-    expect(post.trackingUrl).toContain(`utm_content=${post.id}`);
+    expect(knowledge.what).toMatchObject({ status: "known", basis: "site" });
+    expect(knowledge.differentiators.map((f) => [f.text, f.status])).toEqual([
+      ["成果が出たときだけ課金", "known"],
+      ["業界最速", "assumption"],
+    ]);
+    expect(knowledge.differentiators[0].evidence[0].url).toBe("https://indie.example/pricing");
+    expect(knowledge.questions.some((q) => q.topic === "pricing")).toBe(true);
+
+    // Market: customer language, including what the search box says — grounded by construction.
+    const insights = await conn.marketInsights.find();
+    expect(insights.find((i) => i.kind === "search_demand")).toMatchObject({ grounded: true });
+    expect(insights.find((i) => i.kind === "community")).toMatchObject({ grounded: false });
+
+    // Audience & positioning: confidence counted from real sources; reasons carry their status.
+    const [segment] = await conn.segments.find();
+    expect(segment).toMatchObject({ confidence: "medium", status: "hypothesis" });
+    const [positioning] = await conn.positionings.find();
+    expect(positioning.because.map((b) => b.status)).toEqual(["known", "assumption", "known"]);
+
+    // Strategy: X is the one focus, whatever the model proposed.
+    const [strategy] = await conn.strategies.find();
+    expect(strategy.channels.filter((c) => c.role === "focus").map((c) => c.name)).toEqual(["X"]);
+    expect(strategy.positioning.oneLiner).toBe(positioning.oneLiner);
+
+    // Hypotheses, and a week of ideas that alternate between them.
+    const hypotheses = await conn.hypotheses.find();
+    expect(hypotheses).toHaveLength(2);
+    const ideasAndDrafts = (await conn.posts.find()).filter((p) => p.kind === "post");
+    expect(ideasAndDrafts).toHaveLength(7);
+    expect(new Set(ideasAndDrafts.map((p) => p.plannedFor)).size).toBe(7);
+    const drafted = ideasAndDrafts.filter((p) => p.status === "draft");
+    expect(drafted.length).toBeGreaterThanOrEqual(2);
+    expect(drafted.every((p) => p.trackingUrl?.includes(`utm_content=${p.id}`))).toBe(true);
+
+    // The home screen reads as a marketer's briefing, and says what to do next.
+    const brain = await loadBrainView(product.id, conn);
+    expect(brain.recommendation.headline).toContain("承認を待っている投稿");
+    expect(brain.product?.tally.known).toBeGreaterThan(0);
+    expect(brain.feed).toHaveLength(1);
+
+    // ── Results come in: the "pain" posts bring three times the visitors per impression.
+    const pain = hypotheses.find((h) => h.subject === "マーケが苦手")!;
+    const message = hypotheses.find((h) => h.subject === "AIで作れる")!;
+    // Top each hypothesis up to three published posts, as a week of publishing would.
+    for (const h of [pain, message]) {
+      const own = (await conn.posts.find()).filter((p) => p.hypothesisId === h.id);
+      for (let i = own.length; i < 3; i++) {
+        await conn.posts.insert({ productId: product.id, kind: "post", postType: "educational", hypothesisId: h.id, topic: `追加${h.subject}${i}`, hook: "", body: "", cta: "", text: `追加${i}`, rationale: "" });
+      }
+    }
+    expect(await publishFor(conn, product.id, pain.id, 100, 3)).toBeGreaterThanOrEqual(3);
+    expect(await publishFor(conn, product.id, message.id, 100, 1)).toBeGreaterThanOrEqual(3);
+
+    // ── The next day: measure → learn → revise → new experiments.
+    expect(await planSteps(product.id, "daily", conn)).toEqual([
+      "metrics",
+      "measure",
+      "learn",
+      "revise",
+      "watch",
+      "experiments",
+      "ideas",
+      "content",
+      "opportunities",
+    ]);
+    const { run: daily } = await startGrowthRun(product.id, "u1", "daily", conn);
+    const second = await driveRun(daily.id, growthExecutor(conn, fakeServices(calls)), 60_000, conn);
+    const step = (kind: string) => second?.steps.find((s) => s.kind === kind);
+    expect(step("metrics")?.status).toBe("skipped"); // no X credentials: the numbers came in by hand
+    expect(step("measure")?.status).toBe("completed");
+
+    // The verdicts were reached in code, from the numbers.
+    const judged = await conn.hypotheses.find();
+    expect(judged.find((h) => h.id === pain.id)).toMatchObject({ status: "supported", learned: true });
+    expect(judged.find((h) => h.id === message.id)).toMatchObject({ status: "refuted", learned: true });
+    expect(judged.find((h) => h.id === pain.id)?.result?.lift).toBe(2);
+
+    // Learnings: product-specific marketing knowledge, with the evidence behind it.
+    const learnings = await conn.learnings.find();
+    expect(learnings.map((l) => l.direction).sort()).toEqual(["fails", "works"]);
+    expect(learnings.find((l) => l.direction === "works")?.evidence.lift).toBe(2);
+
+    // The strategy changed because of a learning — and only the supported change was kept.
+    const versions = (await conn.strategies.find()).sort((a, b) => b.version - a.version);
+    expect(versions[0]).toMatchObject({ version: 2, origin: "revision", coreMessage: "マーケが苦手でも、最初の100人は来る" });
+    expect(versions[0].changes).toEqual([{ what: "中心メッセージを「マーケが苦手」の痛みに寄せた", because: "学び[0]で訪問率が3倍" }]);
+    expect(versions[0].channels).toEqual(versions[1].channels);
+
+    // The week's review has the funnel, with signups "not measured" rather than zero.
+    const [report] = await conn.analyticsReports.find();
+    expect(report.funnel).toMatchObject({ impressions: expect.any(Number), signups: null });
+
+    // And the loop goes on: new hypotheses, written with the learnings in hand.
+    const next = (await conn.hypotheses.find()).filter((h) => h.status === "testing");
+    expect(next.map((h) => h.subject).sort()).toEqual(["失敗談", "手順"].sort());
+
+    const after = await loadBrainView(product.id, conn);
+    expect(after.learnings.length).toBe(2);
+    expect(after.strategy?.version).toBe(2);
   });
 });
